@@ -37,7 +37,7 @@ namespace BundleSystem
                 if (!IsAssetCanBundled(unityPath)) continue;
 
                 resultAssetPath.Add(unityPath);
-                resultLoadPath.Add(Utility.CombinePath(dirPrefix, Path.GetFileNameWithoutExtension(unityPath)));
+                resultLoadPath.Add(Utility.CombinePath(dirPrefix, unityPath));
             }
 
             if (includeSubdir)

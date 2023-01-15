@@ -1,5 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEditor;
+using UnityEngine;
 
 namespace BundleSystem
 {
@@ -30,8 +32,16 @@ namespace BundleSystem
                 foreach(var asset in bundle.assetNames)
                 {
                     var rootNode = new RootNode(asset, bundle.assetBundleName, depsHash, false);
-                    context.RootNodes.Add(asset, rootNode);
-                    rootNodesToProcess.Add(rootNode);
+                    try
+                    {
+                        context.RootNodes.Add(asset, rootNode);
+                        rootNodesToProcess.Add(rootNode);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($@"Errored on building tree: {asset} is duplicated.");
+                        throw;
+                    }
                 }
             }
 

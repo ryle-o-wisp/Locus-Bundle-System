@@ -7,6 +7,7 @@ using UnityEditor.Build.Pipeline.Interfaces;
 using UnityEditor.Build.Pipeline.WriteTypes;
 using UnityEngine;
 using System;
+using UnityEditor.VersionControl;
 
 namespace BundleSystem
 {
@@ -110,17 +111,30 @@ namespace BundleSystem
                 var folderPath = AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
                 if (!AssetDatabase.IsValidFolder(folderPath)) throw new Exception($"Could not found Path {folderPath} for {setting.BundleName}");
 
+                var catalog = BundlePathCatalog.BuildOrUpdate(folderPath);
+                var catalogPath = AssetDatabase.GetAssetPath(catalog);
+
                 //collect assets
-                var assetPathes = new List<string>();
-                var loadPathes = new List<string>();
-                Utility.GetFilesInDirectory(string.Empty, assetPathes, loadPathes, folderPath, setting.IncludeSubfolder);
-                if (assetPathes.Count == 0) Debug.LogWarning($"Could not found Any Assets {folderPath} for {setting.BundleName}");
+                var assetPaths = new List<string>();
+                var loadPaths = new List<string>();
+                Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder);
+                if (assetPaths.Count == 0) Debug.LogWarning($"Could not found Any Assets {folderPath} for {setting.BundleName}");
+
+                var catalogIndex = assetPaths.IndexOf(catalogPath);
+                if (catalogIndex >= 0)
+                {
+                    assetPaths.RemoveAt(catalogIndex);
+                    loadPaths.RemoveAt(catalogIndex);
+                }
+
+                assetPaths.Insert(0, catalogPath);
+                loadPaths.Insert(0, nameof(BundlePathCatalog) );
 
                 //make assetbundlebuild
                 var newBundle = new AssetBundleBuild();
                 newBundle.assetBundleName = setting.BundleName;
-                newBundle.assetNames = assetPathes.ToArray();
-                newBundle.addressableNames = loadPathes.ToArray();
+                newBundle.assetNames = assetPaths.ToArray();
+                newBundle.addressableNames = loadPaths.ToArray();
                 bundleList.Add(newBundle);
             }
 

@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -99,6 +100,71 @@ namespace BundleSystem
             return loadedAsset;
         }
 
+        public static T LoadByGuid<T>(string guid) where T : UnityEngine.Object
+        {
+#if UNITY_EDITOR
+            if (UseAssetDatabase)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path)) return null; // not exist.
+                return AssetDatabase.LoadAssetAtPath<T>(path);
+            }
+#endif
+            if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
+            using var iter = s_AssetBundles.GetEnumerator();
+            while (iter.MoveNext())
+            {
+                var kvp = iter.Current;
+                var bundleName = kvp.Key;
+                var pathCatalog = kvp.Value.PathCatalog;
+                if (pathCatalog != null && pathCatalog.TryGetMainAssetPath(guid, out var path))
+                {
+                    return Load<T>(bundleName, path);
+                }
+            }
+            return null;
+        }
+        
+        public static T LoadByGuidAndLocalId<T>(string guid, long localId) where T : UnityEngine.Object
+        {
+#if UNITY_EDITOR
+            if (UseAssetDatabase)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path)) return null; // not exist.
+                foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(path))
+                {
+                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out var loadedGuid,
+                            out long loadedLocalId) && localId == loadedLocalId)
+                    {
+                        return asset as T;
+                    }
+                }
+                return null;
+            }
+#endif
+            if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
+            using var iter = s_AssetBundles.GetEnumerator();
+            while (iter.MoveNext())
+            {
+                var kvp = iter.Current;
+                var bundleName = kvp.Key;
+                var pathCatalog = kvp.Value.PathCatalog;
+                if (pathCatalog != null && pathCatalog.TryGetSubAssetPath(guid, localId, out var path, out var assetName))
+                {
+                    var assets = LoadWithSubAssets<T>(bundleName, path);
+                    for (int i = 0; i < assets.Length; i++)
+                    {
+                        var asset = assets[i];
+                        if (asset.name == assetName)
+                        {
+                            return asset;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
         
         public static T[] LoadWithSubAssets<T>(string bundleName, string assetName) where T : UnityEngine.Object
         {
@@ -138,6 +204,98 @@ namespace BundleSystem
             RetainBundleInternal(foundBundle, 1);
             request.completed += op => AsyncAssetLoaded(request, foundBundle);
             return new BundleRequest<T>(request);
+        }
+        
+        public static BundleRequest<T> LoadByGuidAsync<T>(string guid) where T : UnityEngine.Object
+        {
+#if UNITY_EDITOR
+            if (UseAssetDatabase) 
+            {
+                EnsureAssetDatabase();
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path)) return null; // not exist.
+                return new BundleRequest<T>(UnityEditor.AssetDatabase.LoadAssetAtPath<T>(path));
+            }
+#endif
+            if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
+            
+            using var iter = s_AssetBundles.GetEnumerator();
+            while (iter.MoveNext())
+            {
+                var kvp = iter.Current;
+                var bundleName = kvp.Key;
+                var pathCatalog = kvp.Value.PathCatalog;
+                if (pathCatalog != null && pathCatalog.TryGetMainAssetPath(guid, out var path))
+                {
+                    if (!s_AssetBundles.TryGetValue(bundleName, out var foundBundle)) return new BundleRequest<T>((T)null); //asset not exist
+                    var request = foundBundle.Bundle.LoadAssetAsync<T>(path);
+                    //need to keep bundle while loading, so we retain before load, release after load
+                    RetainBundleInternal(foundBundle, 1);
+                    request.completed += op => AsyncAssetLoaded(request, foundBundle);
+                    return new BundleRequest<T>(request);
+                }
+            }
+            return new BundleRequest<T>((AssetBundleRequest)null);
+        }
+        
+        public static BundleRequest<T> LoadByGuidAndLocalIdAsync<T>(string guid, long localId) where T : UnityEngine.Object
+        {   
+#if UNITY_EDITOR
+            if (UseAssetDatabase)
+            {
+                EnsureAssetDatabase();
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path)) return null; // not exist.
+                foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(path))
+                {
+                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out var loadedGuid,
+                            out long loadedLocalId) && localId == loadedLocalId)
+                    {
+                        return new BundleRequest<T>(asset as T);
+                    }
+                }
+                return new BundleRequest<T>((T)null);
+            }
+#endif
+            if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
+            
+            using var iter = s_AssetBundles.GetEnumerator();
+            while (iter.MoveNext())
+            {
+                var kvp = iter.Current;
+                var bundleName = kvp.Key;
+                var pathCatalog = kvp.Value.PathCatalog;
+                if (pathCatalog != null && pathCatalog.TryGetSubAssetPath(guid, localId, out var path, out var assetName))
+                {
+                    if (!s_AssetBundles.TryGetValue(bundleName, out var foundBundle)) return new BundleRequest<T>((T)null); //asset not exist
+                    var request = foundBundle.Bundle.LoadAssetWithSubAssetsAsync<T>(path);
+                    //need to keep bundle while loading, so we retain before load, release after load
+                    RetainBundleInternal(foundBundle, 1);
+                    request.completed += op => AsyncAssetLoaded(request, foundBundle);
+                    return new BundleRequest<T>(request, assetName);
+                }
+            }
+            return new BundleRequest<T>((AssetBundleRequest)null);
+        }
+        
+        public static BundleRequest<T> LoadAsync<T>(string bundleName, string assetName, string subAssetName) where T : UnityEngine.Object
+        {
+#if UNITY_EDITOR
+            if (UseAssetDatabase) 
+            {
+                EnsureAssetDatabase();
+                var assetPath = s_EditorAssetMap.GetAssetPath<T>(bundleName, assetName);
+                if(string.IsNullOrEmpty(assetPath)) return new BundleRequest<T>((T)null); //asset not exist
+                return new BundleRequest<T>(UnityEditor.AssetDatabase.LoadAssetAtPath<T>(assetPath));
+            }
+#endif
+            if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
+            if (!s_AssetBundles.TryGetValue(bundleName, out var foundBundle)) return new BundleRequest<T>((T)null); //asset not exist
+            var request = foundBundle.Bundle.LoadAssetWithSubAssetsAsync<T>(assetName);
+            //need to keep bundle while loading, so we retain before load, release after load
+            RetainBundleInternal(foundBundle, 1);
+            request.completed += op => AsyncAssetLoaded(request, foundBundle);
+            return new BundleRequest<T>(request, subAssetName);
         }
 
         private static void AsyncAssetLoaded(AssetBundleRequest request, LoadedBundle loadedBundle)
@@ -222,6 +380,62 @@ namespace BundleSystem
             if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
             if (!s_AssetBundles.TryGetValue(bundleName, out var foundBundle)) return false;
             return foundBundle.Bundle.Contains(assetName);
+        }
+
+        public static bool IsAssetExistByGuid(string guid)
+        {   
+#if UNITY_EDITOR
+            if (UseAssetDatabase) 
+            {
+                EnsureAssetDatabase();
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                return string.IsNullOrEmpty(path) == false;
+            }
+#endif
+            if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
+            
+            using var iter = s_AssetBundles.GetEnumerator();
+            while (iter.MoveNext())
+            {
+                var kvp = iter.Current;
+                var pathCatalog = kvp.Value.PathCatalog;
+                if (pathCatalog != null && pathCatalog.ContainsGuid(guid))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        
+        public static bool IsAssetExistByGuidAndLocalId(string guid, long localId)
+        {   
+#if UNITY_EDITOR
+            if (UseAssetDatabase) 
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path)) return false;
+                var allAssets = AssetDatabase.LoadAllAssetsAtPath(guid);
+                return allAssets?
+                    .Any(asset => 
+                        AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out _, out long readLocalId) 
+                        && readLocalId == localId) ?? false;
+            }
+#endif
+            if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
+            
+            using var iter = s_AssetBundles.GetEnumerator();
+            while (iter.MoveNext())
+            {
+                var kvp = iter.Current;
+                var pathCatalog = kvp.Value.PathCatalog;
+                if (pathCatalog != null && pathCatalog.TryGetSubAssetPath(guid, localId, out _, out _))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public static string[] GetAssetNames(string bundleName) 
@@ -361,6 +575,7 @@ namespace BundleSystem
     {
         AssetBundleRequest mRequest;
         T mLoadedAsset;
+        private readonly string _subAssetName;
 
         /// <summary>
         /// actual assetbundle request warpper
@@ -369,22 +584,34 @@ namespace BundleSystem
         public BundleRequest(AssetBundleRequest request)
         {
             mRequest = request;
+            _subAssetName = null;
         }
+        
+        public BundleRequest(AssetBundleRequest request, string subAssetName)
+        {
+            mRequest = request;
+            _subAssetName = subAssetName;
+        }
+
+        private readonly bool _releaseObjectOnDispose;
 
         /// <summary>
         /// create already ended bundle request for editor use
         /// </summary>
         /// <param name="loadedAsset"></param>
-        public BundleRequest(T loadedAsset)
+        /// <param name="releaseObjectOnDispose">Release Object on dispose</param>
+        public BundleRequest(T loadedAsset, bool releaseObjectOnDispose = false)
         {
             mLoadedAsset = loadedAsset;
+            _subAssetName = null;
+            _releaseObjectOnDispose = releaseObjectOnDispose;
         }
 
         //provide similar apis
         public override bool keepWaiting => mRequest == null ? false : !mRequest.isDone;
         public bool IsDone => mRequest == null ? true : mRequest.isDone;
         bool IAwaiter<BundleRequest<T>>.IsCompleted => IsDone;
-        public T Asset => mRequest == null ? mLoadedAsset : mRequest.asset as T;
+        public T Asset => mRequest == null ? mLoadedAsset : _subAssetName != null ? mRequest.allAssets.FirstOrDefault(asset=>asset.name == _subAssetName) as T : mRequest.asset as T;
         public float Progress => mRequest == null ? 1f : mRequest.progress;
 
         public void Dispose()
@@ -402,6 +629,10 @@ namespace BundleSystem
                         if(mRequest.asset != null) BundleManager.ReleaseObject(mRequest.asset);
                     };
                 }
+            }
+            else if (_releaseObjectOnDispose)
+            {
+                BundleManager.ReleaseObject(mLoadedAsset);
             }
         }
 

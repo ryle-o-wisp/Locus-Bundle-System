@@ -36,6 +36,19 @@ namespace BundleSystem
                 Dependencies = info.Dependencies;
                 Dependencies.Add(Name);
             }
+
+            private BundlePathCatalog _pathCatalog;
+            public BundlePathCatalog PathCatalog
+            {
+                get
+                {
+                    if (Bundle != null && _pathCatalog == null)
+                    {
+                        _pathCatalog = Bundle.LoadAsset<BundlePathCatalog>(nameof(BundlePathCatalog));
+                    }
+                    return _pathCatalog;
+                }
+            }
         }
 
         //Asset bundles that is loaded keep it static so we can easily call this in static method
