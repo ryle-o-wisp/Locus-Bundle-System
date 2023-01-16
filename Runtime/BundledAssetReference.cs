@@ -225,7 +225,13 @@ namespace BundleSystem
                 var changedAsset = EditorGUI.ObjectField(referenceFieldPosition, asset, typeof(TObject), false) as TObject;
                 if (changedAsset != asset)
                 {
-                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(changedAsset, out var changedGuid, out long changedLocalId))
+                    if (changedAsset == null)
+                    {
+                        assetGuidProperty.stringValue = null;
+                        assetLocalIdProperty.longValue = 0;
+                        isMainAssetProperty.boolValue = false;
+                    }
+                    else if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(changedAsset, out var changedGuid, out long changedLocalId))
                     {
                         assetGuidProperty.stringValue = changedGuid;
                         assetLocalIdProperty.longValue = changedLocalId;
