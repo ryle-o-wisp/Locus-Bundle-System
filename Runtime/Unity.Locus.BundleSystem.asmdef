@@ -1,6 +1,6 @@
 {
     "name": "Unity.Locus.BundleSystem",
-    "references": [],
+    "references": ["GUID:a4b21e772636f4f018b7cf036d722999"],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

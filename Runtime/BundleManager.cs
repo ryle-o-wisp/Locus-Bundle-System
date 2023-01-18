@@ -1,8 +1,11 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using System.Collections;
 using UnityEngine.Networking;
 using System.IO;
+using System.Linq;
+using Unity.Networking;
 
 namespace BundleSystem
 {
@@ -142,11 +145,11 @@ namespace BundleSystem
         public static BundleAsyncOperation Initialize(bool autoReloadBundle = true)
         {
             var result = new BundleAsyncOperation();
-            s_Helper.StartCoroutine(CoInitalizeLocalBundles(result, autoReloadBundle));
+            s_Helper.StartCoroutine(CoInitializeLocalBundles(result, autoReloadBundle));
             return result;
         }
 
-        static IEnumerator CoInitalizeLocalBundles(BundleAsyncOperation result, bool autoReloadBundle)
+        static IEnumerator CoInitializeLocalBundles(BundleAsyncOperation result, bool autoReloadBundle)
         {
             if(Initialized)
             {
@@ -450,6 +453,251 @@ namespace BundleSystem
                     }
 
                     var loadedBundle = new LoadedBundle(bundleInfo, loadURL, null, islocalBundle);
+                    bundleRequests.Add(bundleInfo.BundleName, bundleReq);
+                    loadedBundles.Add(bundleInfo.BundleName, loadedBundle);
+                    if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName} Complete");
+                }
+            }
+
+            if(result.IsCancelled)
+            {
+                foreach(var kv in bundleRequests)
+                {
+                    kv.Value.Dispose();
+                }
+                yield break;
+            }
+
+            foreach(var kv in bundleRequests)
+            {
+                var loadedBundle = loadedBundles[kv.Key];
+                if (s_AssetBundles.TryGetValue(loadedBundle.Name, out var previousBundle))
+                {
+                    bundleReplaced = true;
+                    previousBundle.Bundle.Unload(false);
+                    if (previousBundle.RequestForReload != null) 
+                        previousBundle.RequestForReload.Dispose(); //dispose reload bundle
+                }
+                loadedBundle.Bundle = DownloadHandlerAssetBundle.GetContent(kv.Value);
+                CollectSceneNames(loadedBundle);
+                s_AssetBundles[loadedBundle.Name] = loadedBundle;
+                kv.Value.Dispose();
+            }
+
+            //let's drop unknown bundles loaded
+            foreach(var name in bundlesToUnload)
+            {
+                var bundleInfo = s_AssetBundles[name];
+                bundleInfo.Bundle.Unload(false);
+                if (bundleInfo.RequestForReload != null)
+                    bundleInfo.RequestForReload.Dispose(); //dispose reload bundle
+                s_AssetBundles.Remove(bundleInfo.Name);
+            }
+
+            //bump entire bundles' usage timestamp
+            //we use manifest directly to find out entire list
+            for (int i = 0; i < manifest.BundleInfos.Count; i++)
+            {
+                var cachedInfo = manifest.BundleInfos[i].AsCached;
+                if (Caching.IsVersionCached(cachedInfo)) Caching.MarkAsUsed(cachedInfo);
+            }
+
+            if (LogMessages) Debug.Log($"CacheUsed Before Cleanup : {Caching.defaultCache.spaceOccupied} bytes");
+            Caching.ClearCache(600); //as we bumped entire list right before clear, let it be just 600
+            if (LogMessages) Debug.Log($"CacheUsed After CleanUp : {Caching.defaultCache.spaceOccupied} bytes");
+
+            PlayerPrefs.SetString("CachedManifest", JsonUtility.ToJson(manifest));
+            GlobalBundleHash = manifest.GlobalHash.ToString();
+            result.Result = bundleReplaced;
+            result.Done(BundleErrorCode.Success);
+        }
+        
+        
+        /// <summary>
+        /// acutally download assetbundles load from cache if cached 
+        /// </summary>
+        /// <param name="manifest">manifest you get from GetManifest() function</param>
+        /// <param name="subsetNames">names that you interested among full bundle list(optional)</param>
+        public static BundleAsyncOperation<bool> DownloadAssetBundlesInBackground(AssetbundleBuildManifest manifest, IEnumerable<string> subsetNames = null)
+        {
+            var result = new BundleAsyncOperation<bool>();
+            s_Helper.StartCoroutine(CoDownloadAssetBundlesInBackground(manifest, subsetNames, result));
+            return result;
+        }
+
+        static IEnumerator CoDownloadAssetBundlesInBackground(AssetbundleBuildManifest manifest, IEnumerable<string> subsetNames, BundleAsyncOperation<bool> result)
+        {
+            if (!Initialized)
+            {
+                Debug.LogError("Do Initialize first");
+                result.Done(BundleErrorCode.NotInitialized);
+                yield break;
+            }
+
+#if UNITY_EDITOR
+            if(UseAssetDatabase)
+            {
+                result.Done(BundleErrorCode.Success);
+                yield break;
+            }
+#endif
+
+            var bundlesToUnload = new HashSet<string>(s_AssetBundles.Keys);
+            var downloadBundleList = subsetNames == null ? manifest.BundleInfos : manifest.CollectSubsetBundleInfoes(subsetNames);
+            var bundleReplaced = false; //bundle has been replaced
+            
+            //temp dictionaries to apply very last
+            var bundleRequests = new Dictionary<string, UnityWebRequest>();
+            var loadedBundles = new Dictionary<string, LoadedBundle>();
+
+            result.SetIndexLength(downloadBundleList.Count);
+
+            string tempDownloadPath = Utility.CombinePath(Application.temporaryCachePath, "_assetBundles");
+            if (Directory.Exists(tempDownloadPath) == false)
+            {
+                Directory.CreateDirectory(tempDownloadPath);
+            }
+
+            List<BackgroundDownloadConfig> settings = new List<BackgroundDownloadConfig>();
+            for (int i = 0; i < downloadBundleList.Count; i++)
+            {
+                var bundleInfo = downloadBundleList[i];
+                var isLocalBundle = s_LocalBundles.TryGetValue(bundleInfo.BundleName, out var localHash) && localHash == bundleInfo.Hash;
+                if (isLocalBundle) continue; // exclude local bundle files.
+                
+                var isCached = Caching.IsVersionCached(bundleInfo.AsCached);
+                if (isCached)
+                {
+                    if(LogMessages) Debug.Log($@"{bundleInfo.BundleName}({bundleInfo.Hash}) is cached. skip background downloading");
+                    continue;
+                }
+                
+                settings.Add(new BackgroundDownloadConfig
+                {
+                    url = new Uri(Utility.CombinePath(RemoteURL, bundleInfo.BundleName)),
+                    filePath = Utility.CombinePath(tempDownloadPath, bundleInfo.BundleName),
+                });
+            }
+
+            var downloads = BackgroundDownload.Start(settings.ToArray());
+            
+            bool IsDownloading()
+            {
+                int downloading = 0;
+                foreach (var dl in downloads)
+                {
+                    if (dl.status == BackgroundDownloadStatus.Downloading)
+                    {
+                        downloading++;
+                    }
+                }
+
+                return downloads.Length > 0 && downloading > 0;
+            }
+
+            bool AnyFailure(out BackgroundDownload[] outFailedDownloads)
+            {
+                List<BackgroundDownload> failedDownloads = null;
+                
+                foreach (var dl in downloads)
+                {
+                    if (dl.status == BackgroundDownloadStatus.Failed)
+                    {
+                        failedDownloads ??= new List<BackgroundDownload>();
+                        failedDownloads.Add(dl);
+                    }
+                }
+
+                outFailedDownloads = failedDownloads?.ToArray();
+                return failedDownloads is not null;
+            }
+
+            bool TryInterruptIfAnyFailure()
+            {
+                if (AnyFailure(out var failedDownloads))
+                {
+                    result.Done(BundleErrorCode.NetworkError);
+                    
+                    var failedUrls = failedDownloads?.Select(dl => dl.config.url.ToString()).ToArray() ??
+                                     Array.Empty<string>();
+                    
+                    Debug.LogError($"Background downloading failed. stopped downloading process ({string.Join(",", failedUrls)})");
+
+                    foreach (var dl in downloads)
+                    {
+                        dl.Dispose();
+                    }
+
+                    return true;
+                }
+                return false;
+            }
+
+            if (LogMessages) Debug.Log($"Start download files in background");
+            
+            while (IsDownloading())
+            {
+                yield return null;
+                if (TryInterruptIfAnyFailure()) yield break;
+            }
+            if (TryInterruptIfAnyFailure()) yield break;
+            
+            if (LogMessages) Debug.Log($"Complete download files in background");
+            
+            for (int i = 0; i < downloadBundleList.Count; i++)
+            {
+                result.SetCurrentIndex(i);
+                var bundleInfo = downloadBundleList[i];
+
+                //remove from the set so we can track bundles that should be cleared
+                bundlesToUnload.Remove(bundleInfo.BundleName);
+
+                var isLocalBundle = s_LocalBundles.TryGetValue(bundleInfo.BundleName, out var localHash) && localHash == bundleInfo.Hash;
+                var isCached = Caching.IsVersionCached(bundleInfo.AsCached);
+                result.SetCachedBundle(isCached);
+
+                var loadURL = isLocalBundle ? Utility.CombinePath(LocalURL, bundleInfo.BundleName) : Utility.CombinePath(tempDownloadPath, bundleInfo.BundleName);
+                if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName}, loadURL {loadURL}, isLocalBundle : {isLocalBundle}, isCached {isCached}");
+
+                if (s_AssetBundles.TryGetValue(bundleInfo.BundleName, out var previousBundle) && previousBundle.Hash == bundleInfo.Hash)
+                {
+                    if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName} Complete - load skipped");
+                }
+                else
+                {
+                    var bundleReq = isLocalBundle ? UnityWebRequestAssetBundle.GetAssetBundle(loadURL) : UnityWebRequestAssetBundle.GetAssetBundle($"file://{loadURL}", bundleInfo.AsCached);
+                    var operation = bundleReq.SendWebRequest();
+                    while (!bundleReq.isDone)
+                    {
+                        result.SetProgress(operation.progress);
+                        yield return null;
+                        if(result.IsCancelled) break;
+                    }
+
+                    if(result.IsCancelled)
+                    {
+                        bundleReq.Dispose();
+                        break;
+                    }
+
+                    if(!Utility.CheckRequestSuccess(bundleReq))
+                    {
+                        result.Done(BundleErrorCode.NetworkError);
+                        yield break;
+                    }
+
+                    if (isLocalBundle == false)
+                    {
+                        // delete after cached.
+                        var filePath = Utility.CombinePath(tempDownloadPath, bundleInfo.BundleName);
+                        if (File.Exists(filePath))
+                        {
+                            File.Delete(filePath);
+                            if (LogMessages) Debug.Log($"Deleted temporal downloaded file: {bundleInfo.BundleName}");
+                        }
+                    }
+
+                    var loadedBundle = new LoadedBundle(bundleInfo, loadURL, null, isLocalBundle);
                     bundleRequests.Add(bundleInfo.BundleName, bundleReq);
                     loadedBundles.Add(bundleInfo.BundleName, loadedBundle);
                     if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName} Complete");

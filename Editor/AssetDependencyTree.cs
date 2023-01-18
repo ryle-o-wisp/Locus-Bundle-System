@@ -136,7 +136,7 @@ namespace BundleSystem
                         {
                             node.RemoveFromTree(context);
 
-                            var newName = $"Shared_{AssetDatabase.AssetPathToGUID(child)}";
+                            var newName = $"Shared_{AssetDatabase.AssetPathToGUID(child)}.bundle";
                             var depsHash = new HashSet<string>();
                             context.DependencyDic.Add(newName, depsHash);
                             var newRoot = new RootNode(child, newName, depsHash, true);

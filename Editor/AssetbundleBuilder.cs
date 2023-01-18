@@ -322,7 +322,7 @@ namespace BundleSystem
                 var assetPath = kv.Value;
                 var referencedDefinedBundles = depsOnlyDefined.Where(pair => pair.Value.Contains(bundleName)).Select(pair => pair.Key).ToList();
 
-                sb.AppendLine($"Shared_{AssetDatabase.AssetPathToGUID(assetPath)} - { assetPath } is referenced by");
+                sb.AppendLine($"Shared_{AssetDatabase.AssetPathToGUID(assetPath)}.bundle - { assetPath } is referenced by");
                 foreach(var refBundleName in referencedDefinedBundles) sb.AppendLine($"    - {refBundleName}");
                 sb.AppendLine();
             }
