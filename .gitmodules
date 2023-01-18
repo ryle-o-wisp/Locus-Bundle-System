@@ -1,0 +1,3 @@
+[submodule "UnityBackgroundDownload"]
+	path = UnityBackgroundDownload
+	url = git@github.com:ryle-o-wisp/UnityBackgroundDownload.git
