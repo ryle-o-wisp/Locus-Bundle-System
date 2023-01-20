@@ -13,12 +13,10 @@ namespace BundleSystem
     {
         SerializedProperty m_SettingsProperty;
         SerializedProperty m_AutoCreateSharedBundles;
-        SerializedProperty m_RemoteOutputPath;
-        SerializedProperty m_LocalOutputPath;
+        SerializedProperty m_DistributionProfile;
         SerializedProperty m_EmulateBundle;
         SerializedProperty m_EmulateUseRemoteFolder;
         SerializedProperty m_CleanCache;
-        SerializedProperty m_RemoteURL;
         ReorderableList list;
 
         SerializedProperty m_ForceRebuld;
@@ -42,12 +40,10 @@ namespace BundleSystem
         {
             m_SettingsProperty = serializedObject.FindProperty("BundleSettings");
             m_AutoCreateSharedBundles = serializedObject.FindProperty("AutoCreateSharedBundles");
-            m_RemoteOutputPath = serializedObject.FindProperty("m_RemoteOutputFolder");
-            m_LocalOutputPath = serializedObject.FindProperty("m_LocalOutputFolder");
+            m_DistributionProfile = serializedObject.FindProperty("distributionProfile");
             m_EmulateBundle = serializedObject.FindProperty("EmulateInEditor");
             m_EmulateUseRemoteFolder = serializedObject.FindProperty("EmulateWithoutRemoteURL");
             m_CleanCache = serializedObject.FindProperty("CleanCacheInEditor");
-            m_RemoteURL = serializedObject.FindProperty("RemoteURL");
 
             m_ForceRebuld = serializedObject.FindProperty("ForceRebuild");
             m_UseCacheServer = serializedObject.FindProperty("UseCacheServer");
@@ -107,14 +103,8 @@ namespace BundleSystem
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(m_RemoteOutputPath);
-            if (GUILayout.Button("Open", GUILayout.ExpandWidth(false))) EditorUtility.RevealInFinder(Utility.CombinePath(settings.RemoteOutputPath, EditorUserBuildSettings.activeBuildTarget.ToString()));
+            EditorGUILayout.PropertyField(m_DistributionProfile);
             GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(m_LocalOutputPath);
-            if (GUILayout.Button("Open", GUILayout.ExpandWidth(false))) EditorUtility.RevealInFinder(Utility.CombinePath(settings.LocalOutputPath, EditorUserBuildSettings.activeBuildTarget.ToString()));
-            GUILayout.EndHorizontal();
-            EditorGUILayout.PropertyField(m_RemoteURL);
             EditorGUILayout.Space();
             EditorGUILayout.PropertyField(m_EmulateBundle);
             EditorGUILayout.PropertyField(m_EmulateUseRemoteFolder);
@@ -138,8 +128,8 @@ namespace BundleSystem
                 m_FtpPass.stringValue = EditorGUILayout.PasswordField("Ftp Password", m_FtpPass.stringValue);
             }
 
-            GUILayout.Label($"Local Output folder : { settings.LocalOutputPath }");
-            GUILayout.Label($"Remote Output folder : { settings.RemoteOutputPath }");
+            GUILayout.Label($"Local Output folder : { (settings.distributionProfile == null ? "(DistributionProfile required)" : settings.distributionProfile.localOutputFolder) }");
+            GUILayout.Label($"Remote Output folder : { (settings.distributionProfile == null ? "(DistributionProfile required)" : settings.distributionProfile.remoteOutputFolder) }");
 
             serializedObject.ApplyModifiedProperties();
 

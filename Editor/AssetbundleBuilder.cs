@@ -155,6 +155,8 @@ namespace BundleSystem
                 }
             }
 
+            if (settings.distributionProfile == null) throw new InvalidProgramException("distribution profile is missing!");
+
             var bundleList = GetAssetBundlesList(settings);
 
             var buildTarget = EditorUserBuildSettings.activeBuildTarget;
@@ -192,12 +194,12 @@ namespace BundleSystem
                 switch(buildType)
                 {
                     case BuildType.Local:
-                        WriteManifestFile(outputPath, results, buildTarget, settings.RemoteURL);
+                        WriteManifestFile(outputPath, results, buildTarget, settings.distributionProfile.remoteURL);
                         WriteLogFile(outputPath, results);
                         if(!Application.isBatchMode) EditorUtility.DisplayDialog("Build Succeeded!", "Local bundle build succeeded!", "Confirm");
                         break;
                     case BuildType.Remote:
-                        WriteManifestFile(outputPath, results, buildTarget, settings.RemoteURL);
+                        WriteManifestFile(outputPath, results, buildTarget, settings.distributionProfile.remoteURL);
                         WriteLogFile(outputPath, results);
                         var linkPath = TypeLinkerGenerator.Generate(settings, results);
                         if (!Application.isBatchMode) EditorUtility.DisplayDialog("Build Succeeded!", $"Remote bundle build succeeded, \n {linkPath} updated!", "Confirm");

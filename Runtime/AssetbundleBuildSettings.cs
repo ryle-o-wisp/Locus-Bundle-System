@@ -85,30 +85,16 @@ namespace BundleSystem
 #endif
         public const string ManifestFileName = "Manifest.json";
         public static string LocalBundleRuntimePath => Application.streamingAssetsPath + "/localbundles/";
-        public string LocalOutputPath => Application.dataPath.Remove(Application.dataPath.Length - 6) + m_LocalOutputFolder;
-        public string RemoteOutputPath => Application.dataPath.Remove(Application.dataPath.Length - 6) + m_RemoteOutputFolder;
+        public string LocalOutputPath => Application.dataPath.Remove(Application.dataPath.Length - 6) + distributionProfile.localOutputFolder;
+        public string RemoteOutputPath => Application.dataPath.Remove(Application.dataPath.Length - 6) + distributionProfile.remoteOutputFolder;
 
         public List<BundleSetting> BundleSettings = new List<BundleSetting>();
 
         [Tooltip("Auto create shared bundles to remove duplicated assets")]
         public bool AutoCreateSharedBundles = true;
 
-        /// <summary>
-        /// output folder inside project
-        /// </summary>
-        [SerializeField]
-        [Tooltip("Remote bundle build output folder")]
-        string m_RemoteOutputFolder = "RemoteBundles";
-        /// <summary>
-        /// output folder inside project
-        /// </summary>
-        [SerializeField]
-        [Tooltip("Local bundle build output folder")]
-        string m_LocalOutputFolder = "LocalBundles";
-
-        [Tooltip("Remote URL for downloading remote bundles")]
-        public string RemoteURL = "http://localhost/";
-
+        public AssetBundleDistributionProfile distributionProfile;
+        
         [Tooltip("Use built asset bundles even in editor")]
         public bool EmulateInEditor = false;
 
