@@ -181,11 +181,11 @@ namespace BundleSystem
         
         public static readonly HashSet<Type> ExcludeAssetType = new HashSet<Type>
         {
-            typeof(AssetbundleBuildSettings),
+            typeof(AssetBundlePackageBuildSettings),
             typeof(BundlePathCatalog),
         };
 
-        [MenuItem("Build/Update Path Catalog")]
+        [MenuItem("Build/Internal/Update Path Catalog")]
         public static void BuildWholeProjectRefeferences()
         {
             BuildOrUpdate("Assets");

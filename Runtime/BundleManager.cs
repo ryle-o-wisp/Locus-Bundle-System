@@ -5,7 +5,11 @@ using System.Collections;
 using UnityEngine.Networking;
 using System.IO;
 using System.Linq;
+using Newtonsoft.Json;
 using Unity.Networking;
+#if UNITY_IOS || UNITY_IPHONE
+using UnityEngine.iOS;
+#endif
 
 namespace BundleSystem
 {
@@ -63,9 +67,44 @@ namespace BundleSystem
         public static bool UseAssetDatabase { get; private set; } = true;
 #endif
         public static bool Initialized { get; private set; } = false;
-        public static string LocalURL { get; private set; }
-        public static string RemoteURL { get; private set; }
-        public static string GlobalBundleHash { get; private set; }
+
+        public static bool TryGetLocalURL(string packageGuid, out string url)
+        {
+            url = default;
+#if UNITY_EDITOR
+            if (AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings == null)
+            {
+                return false;
+            }
+            else
+            {
+                url = $"file://{Utility.CombinePath(Application.dataPath, "..", AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings.GetDistributionProfile().localOutputFolder)}/{packageGuid}/{UnityEditor.EditorUserBuildSettings.activeBuildTarget.ToString()}";
+                return true;
+            }
+#else
+            if (RuntimePackages.Contains(packageGuid))
+            {
+                url = Utility.CombinePath(AssetBundlePackageBuildSettings.LocalBundleRuntimePath, packageGuid);
+                if (Application.platform != RuntimePlatform.Android &&
+                    Application.platform != RuntimePlatform.WebGLPlayer)
+                {
+                    url = $"file://{url}";
+                }
+                return true;
+            }
+            else return false;
+#endif
+        }
+        
+        private static Dictionary<string, string> s_remoteAssetBundleHomeUriByPackageGuid =
+            new Dictionary<string, string>();
+
+        public static bool TryGetRemoteURL(string packageGuid, out string url)
+        {
+            var result = s_remoteAssetBundleHomeUriByPackageGuid.TryGetValue(packageGuid, out url);
+            return result;
+        }
+        
         internal static int UnityMainThreadId { get; private set; }
 
         public static bool AutoReloadBundle { get; private set; } = true;
@@ -84,9 +123,7 @@ namespace BundleSystem
             s_Helper = default;
             s_DebugGUI = default;
             UseAssetDatabase = true;
-            LocalURL = default;
-            RemoteURL = default;
-            GlobalBundleHash = default;
+            s_remoteAssetBundleHomeUriByPackageGuid = new Dictionary<string, string>();
             AutoReloadBundle = true;
             s_LocalBundles.Clear();
             s_SceneNames.Clear();
@@ -109,6 +146,8 @@ namespace BundleSystem
             s_TrackingGameObjects.Clear();
         }  
 #endif
+
+        public static HashSet<string> RuntimePackages = null;
         
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Setup()
@@ -117,16 +156,21 @@ namespace BundleSystem
             UnityEngine.SceneManagement.SceneManager.sceneUnloaded += TrackOnSceneUnLoaded;
             UnityMainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
             var managerGo = new GameObject("_BundleManager");
-            GameObject.DontDestroyOnLoad(managerGo);
+            UnityEngine.Object.DontDestroyOnLoad(managerGo);
             s_Helper = managerGo.AddComponent<BundleManagerHelper>();
             s_DebugGUI = managerGo.AddComponent<DebugGuiHelper>();
             s_DebugGUI.enabled = s_ShowDebugGUI;
-            LocalURL = AssetbundleBuildSettings.LocalBundleRuntimePath;
+            RuntimePackages = new HashSet<string>(AssetBundlePackageBuildSettings.ReadRuntimePackageList());
 #if UNITY_EDITOR
+            RuntimePackages =
+                new HashSet<string>(
+                AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings
+                    .GetActiveSettingEntries()
+                    .Select(entry=>entry.PackageGuid)
+                    .Distinct());
+            
             SetupAssetdatabaseUsage();
-            LocalURL = Utility.CombinePath(s_EditorBuildSettings.LocalOutputPath, UnityEditor.EditorUserBuildSettings.activeBuildTarget.ToString());
 #endif
-            if (Application.platform != RuntimePlatform.Android && Application.platform != RuntimePlatform.WebGLPlayer) LocalURL = "file://" + LocalURL;
         }
 
         static void CollectSceneNames(LoadedBundle loadedBundle)
@@ -159,123 +203,140 @@ namespace BundleSystem
 
             AutoReloadBundle = autoReloadBundle;
 
-            if(LogMessages) Debug.Log($"LocalURL : {LocalURL}");
-
-            //temp dictionaries to apply very last
-            var bundleRequests = new Dictionary<string, UnityWebRequest>();
-            var loadedBundles = new Dictionary<string, LoadedBundle>();
-            var localBundleHashes = new Dictionary<string, Hash128>();
+            s_remoteAssetBundleHomeUriByPackageGuid.Clear();
             
-            var manifestReq = UnityWebRequest.Get(Utility.CombinePath(LocalURL, AssetbundleBuildSettings.ManifestFileName));
-            yield return manifestReq.SendWebRequest();
-
-            if(result.IsCancelled) 
+            if(LogMessages) Debug.Log($"Initializing {RuntimePackages.Count} packages.");
+            
+            foreach (var builtInPackageGuid in RuntimePackages)
             {
-                manifestReq.Dispose();
-                yield break;
-            }
+                //temp dictionaries to apply very last
+                var bundleRequests = new Dictionary<string, UnityWebRequest>();
+                var loadedBundles = new Dictionary<string, LoadedBundle>();
+                var localBundleHashes = new Dictionary<string, Hash128>();
 
-            if(!Utility.CheckRequestSuccess(manifestReq))
-            {
-                result.Done(BundleErrorCode.NetworkError);
-                yield break;
-            }
-
-            if(!AssetbundleBuildManifest.TryParse(manifestReq.downloadHandler.text, out var localManifest))
-            {
-                result.Done(BundleErrorCode.ManifestParseError);
-                yield break;
-            }
-
-            //cached version is recent one.
-            var cacheIsValid = AssetbundleBuildManifest.TryParse(PlayerPrefs.GetString("CachedManifest", string.Empty), out var cachedManifest) 
-                && cachedManifest.BuildTime > localManifest.BuildTime;
-
-            result.SetIndexLength(localManifest.BundleInfos.Count);
-            for(int i = 0; i < localManifest.BundleInfos.Count; i++)
-            {
-                result.SetCurrentIndex(i);
-                result.SetCachedBundle(true);
-                AssetbundleBuildManifest.BundleInfo bundleInfoToLoad;
-                AssetbundleBuildManifest.BundleInfo cachedBundleInfo = default;
-                var localBundleInfo = localManifest.BundleInfos[i];
-                localBundleHashes.Add(localBundleInfo.BundleName, localBundleInfo.Hash);
-
-                bool useLocalBundle =
-                    !cacheIsValid || //cache is not valid or...
-                    !cachedManifest.TryGetBundleInfo(localBundleInfo.BundleName, out cachedBundleInfo) || //missing bundle or... 
-                    !Caching.IsVersionCached(cachedBundleInfo.AsCached); //is not cached no unusable.
-
-                bundleInfoToLoad = useLocalBundle ? localBundleInfo : cachedBundleInfo;
-                var loadPath = Utility.CombinePath(LocalURL, bundleInfoToLoad.BundleName);
-
-                var bundleReq = UnityWebRequestAssetBundle.GetAssetBundle(loadPath, bundleInfoToLoad.Hash);
-                var bundleOp = bundleReq.SendWebRequest();
-                while (!bundleOp.isDone)
+                if (TryGetLocalURL(builtInPackageGuid, out var localBundleHomePath) == false)
                 {
-                    result.SetProgress(bundleOp.progress);
-                    yield return null;
-                    if(result.IsCancelled) break;
+                    if(LogMessages) Debug.Log($"{builtInPackageGuid} is ignored. Unknown package.");
+                    continue;
+                }
+                if(LogMessages) Debug.Log($"LocalBundleHomePath : {localBundleHomePath}");
+
+                var manifestReq = UnityWebRequest.Get(Utility.CombinePath(localBundleHomePath, AssetBundlePackageBuildSettings.ManifestFileName));
+                yield return manifestReq.SendWebRequest();
+
+                if(result.IsCancelled) 
+                {
+                    manifestReq.Dispose();
+                    yield break;
                 }
 
-                if(result.IsCancelled)
-                {
-                    bundleReq.Dispose();
-                    break;
-                }
-
-                if(Utility.CheckRequestSuccess(bundleReq))
-                {
-                    //load bundle later
-                    var loadedBundle = new LoadedBundle(bundleInfoToLoad, loadPath, null, useLocalBundle);
-                    bundleRequests.Add(localBundleInfo.BundleName, bundleReq);
-                    loadedBundles.Add(localBundleInfo.BundleName, loadedBundle);
-
-                    if (LogMessages) Debug.Log($"Local bundle Loaded - Name : {localBundleInfo.BundleName}, Hash : {bundleInfoToLoad.Hash }");
-                }
-                else
+                if(!Utility.CheckRequestSuccess(manifestReq))
                 {
                     result.Done(BundleErrorCode.NetworkError);
                     yield break;
                 }
-            }
 
-            if(result.IsCancelled)
-            {
+                if(!AssetbundleBuildManifest.TryParse(manifestReq.downloadHandler.text, out var localManifest))
+                {
+                    result.Done(BundleErrorCode.ManifestParseError);
+                    yield break;
+                }
+
+                if(LogMessages) Debug.Log($"Try caching {localManifest.BundleInfos.Count} local bundles.");
+                result.SetIndexLength(localManifest.BundleInfos.Count);
+                for(int i = 0; i < localManifest.BundleInfos.Count; i++)
+                {
+                    result.SetCurrentIndex(i);
+                    result.SetCachedBundle(true);
+                    AssetbundleBuildManifest.BundleInfo bundleInfoToLoad;
+                    AssetbundleBuildManifest.BundleInfo bundleInfo = default;
+                    var localBundleInfo = localManifest.BundleInfos[i];
+                    localBundleHashes.Add(localBundleInfo.BundleName, localBundleInfo.Hash);
+
+                    bool useLocalBundle = 
+                        !localManifest.TryGetBundleInfo(localBundleInfo.BundleName, out bundleInfo) ||
+                        !Caching.IsVersionCached(bundleInfo.AsCached);
+
+                    bundleInfoToLoad = useLocalBundle ? localBundleInfo : bundleInfo;
+                    var loadPath = Utility.CombinePath(localBundleHomePath, bundleInfoToLoad.BundleName);
+
+                    var bundleReq = UnityWebRequestAssetBundle.GetAssetBundle(loadPath, bundleInfoToLoad.Hash);
+                    var bundleOp = bundleReq.SendWebRequest();
+                    while (!bundleOp.isDone)
+                    {
+                        result.SetProgress(bundleOp.progress);
+                        yield return null;
+                        if(result.IsCancelled) break;
+                    }
+
+                    if(result.IsCancelled)
+                    {
+                        bundleReq.Dispose();
+                        break;
+                    }
+
+                    if(Utility.CheckRequestSuccess(bundleReq))
+                    {
+                        //load bundle later
+                        var loadedBundle = new LoadedBundle(bundleInfoToLoad, loadPath, null, useLocalBundle);
+                        bundleRequests.Add(localBundleInfo.BundleName, bundleReq);
+                        loadedBundles.Add(localBundleInfo.BundleName, loadedBundle);
+
+                        if (LogMessages) Debug.Log($"Local bundle Loaded - Name : {localBundleInfo.BundleName}, Hash : {bundleInfoToLoad.Hash }");
+                    }
+                    else
+                    {
+                        result.Done(BundleErrorCode.NetworkError);
+                        yield break;
+                    }
+                }
+
+                if(result.IsCancelled)
+                {
+                    foreach(var kv in bundleRequests)
+                    {
+                        kv.Value.Dispose();
+                    }
+                    yield break;
+                }
+
+                foreach(var kv in s_AssetBundles)
+                {
+                    kv.Value.Bundle.Unload(false);
+                    if (kv.Value.RequestForReload != null) 
+                        kv.Value.RequestForReload.Dispose(); //dispose reload bundle
+                }
+
+                s_AssetBundles.Clear();
+                s_SceneNames.Clear();
+                s_LocalBundles = localBundleHashes;
+
                 foreach(var kv in bundleRequests)
                 {
+                    var loadedBundle = loadedBundles[kv.Key];
+                    loadedBundle.Bundle = DownloadHandlerAssetBundle.GetContent(kv.Value);
+                    CollectSceneNames(loadedBundle);
+                    s_AssetBundles.Add(loadedBundle.Name, loadedBundle);
                     kv.Value.Dispose();
                 }
-                yield break;
-            }
-
-            foreach(var kv in s_AssetBundles)
-            {
-                kv.Value.Bundle.Unload(false);
-                if (kv.Value.RequestForReload != null) 
-                    kv.Value.RequestForReload.Dispose(); //dispose reload bundle
-            }
-
-            s_AssetBundles.Clear();
-            s_SceneNames.Clear();
-            s_LocalBundles = localBundleHashes;
-
-            foreach(var kv in bundleRequests)
-            {
-                var loadedBundle = loadedBundles[kv.Key];
-                loadedBundle.Bundle = DownloadHandlerAssetBundle.GetContent(kv.Value);
-                CollectSceneNames(loadedBundle);
-                s_AssetBundles.Add(loadedBundle.Name, loadedBundle);
-                kv.Value.Dispose();
+                
+                s_remoteAssetBundleHomeUriByPackageGuid[builtInPackageGuid] 
+                    = Utility.CombinePath(localManifest.RemoteURL, localManifest.BuildTarget);
+#if UNITY_EDITOR
+                if (AssetBundleEditorPrefs.EmulateWithoutRemoteURL)
+                {
+                    var settings = AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings.GetActiveSettingEntries()
+                        .FirstOrDefault(setting => setting.PackageGuid == builtInPackageGuid);
+                    s_remoteAssetBundleHomeUriByPackageGuid[builtInPackageGuid] 
+                        = "file://" + Utility.CombinePath(
+                            Utility.GetRemoteOutputPath(settings, AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings.GetDistributionProfile()), 
+                            UnityEditor.EditorUserBuildSettings.activeBuildTarget.ToString());
+                }
+#endif
             }
             
-            RemoteURL = Utility.CombinePath(localManifest.RemoteURL, localManifest.BuildTarget);
-#if UNITY_EDITOR
-            if (s_EditorBuildSettings.EmulateWithoutRemoteURL)
-                RemoteURL = "file://" + Utility.CombinePath(s_EditorBuildSettings.RemoteOutputPath, UnityEditor.EditorUserBuildSettings.activeBuildTarget.ToString());
-#endif
             Initialized = true;
-            if (LogMessages) Debug.Log($"Initialize Success \nRemote URL : {RemoteURL} \nLocal URL : {LocalURL}");
+            if (LogMessages) Debug.Log($"Initialize Success \nRemote URL : {JsonConvert.SerializeObject(s_remoteAssetBundleHomeUriByPackageGuid)}");
             result.Done(BundleErrorCode.Success);
         }
 
@@ -288,14 +349,14 @@ namespace BundleSystem
             return AssetbundleBuildManifest.TryParse(PlayerPrefs.GetString("CachedManifest", string.Empty), out manifest);
         }
 
-        public static BundleAsyncOperation<AssetbundleBuildManifest> GetManifest()
+        public static BundleAsyncOperation<AssetbundleBuildManifest[]> GetAllManifests()
         {
-            var result = new BundleAsyncOperation<AssetbundleBuildManifest>();
+            var result = new BundleAsyncOperation<AssetbundleBuildManifest[]>();
             s_Helper.StartCoroutine(CoGetManifest(result));
             return result;
         }
 
-        static IEnumerator CoGetManifest(BundleAsyncOperation<AssetbundleBuildManifest> result)
+        static IEnumerator CoGetManifest(BundleAsyncOperation<AssetbundleBuildManifest[]> result)
         {
             if (!Initialized)
             {
@@ -307,39 +368,59 @@ namespace BundleSystem
 #if UNITY_EDITOR
             if (UseAssetDatabase)
             {
-                result.Result = new AssetbundleBuildManifest();
+                result.Result = new AssetbundleBuildManifest[] { new AssetbundleBuildManifest() };
                 result.Done(BundleErrorCode.Success);
                 yield break;
             }
 #endif
 
-            var manifestReq = UnityWebRequest.Get(Utility.CombinePath(RemoteURL, AssetbundleBuildSettings.ManifestFileName).Replace('\\', '/'));
-            yield return manifestReq.SendWebRequest();
-
-            if(result.IsCancelled)
+            List<AssetbundleBuildManifest> buildManifests = new List<AssetbundleBuildManifest>();
+            
+            if (LogMessages) Debug.Log($"Retrieving manifests from {RuntimePackages.Count} packages");
+            
+            foreach (var packageGuid in RuntimePackages)
             {
+                if (TryGetRemoteURL(packageGuid, out var remoteUrl) == false) continue;
+
+                var manifestPath =
+                    Utility.CombinePath(remoteUrl, AssetBundlePackageBuildSettings.ManifestFileName)
+                    .Replace('\\', '/');
+                
+                if (LogMessages) Debug.Log($"Try get manifest from {manifestPath}");
+                var manifestReq = UnityWebRequest.Get(manifestPath);
+                yield return manifestReq.SendWebRequest();
+
+                if(result.IsCancelled)
+                {
+                    manifestReq.Dispose();
+                    yield break;
+                }
+
+                if(!Utility.CheckRequestSuccess(manifestReq))
+                {
+                    result.Done(BundleErrorCode.NetworkError);
+                    yield break;
+                }
+
+                var remoteManifestJson = manifestReq.downloadHandler.text;
                 manifestReq.Dispose();
-                yield break;
+
+                if (!AssetbundleBuildManifest.TryParse(remoteManifestJson, out var remoteManifest))
+                {
+                    result.Done(BundleErrorCode.ManifestParseError);
+                    yield break;
+                }
+                
+                if (LogMessages) Debug.Log($"Downloaded Manifest: {remoteManifest.PackageGuid}");
+
+                buildManifests.Add(remoteManifest);
             }
 
-            if(!Utility.CheckRequestSuccess(manifestReq))
-            {
-                result.Done(BundleErrorCode.NetworkError);
-                yield break;
-            }
-
-            var remoteManifestJson = manifestReq.downloadHandler.text;
-            manifestReq.Dispose();
-
-            if (!AssetbundleBuildManifest.TryParse(remoteManifestJson, out var remoteManifest))
-            {
-                result.Done(BundleErrorCode.ManifestParseError);
-                yield break;
-            }
-
-            result.Result = remoteManifest;
+            AllCachedManifests = result.Result = buildManifests.ToArray();
             result.Done(BundleErrorCode.Success);
         }
+        
+        public static AssetbundleBuildManifest[] AllCachedManifests { get; private set; }
 
         /// <summary>
         /// Get download size of entire bundles(except cached)
@@ -347,7 +428,7 @@ namespace BundleSystem
         /// <param name="manifest">manifest you get from GetManifest() function</param>
         /// <param name="subsetNames">names that you interested among full bundle list(optional)</param>
         /// <returns></returns>
-        public static long GetDownloadSize(AssetbundleBuildManifest manifest, IEnumerable<string> subsetNames = null)
+        public static long GetDownloadSize(AssetbundleBuildManifest[] manifests, IEnumerable<string> subsetNames = null)
         {
             if (!Initialized)
             {
@@ -356,14 +437,17 @@ namespace BundleSystem
 
             long totalSize = 0;
 
-            var bundleInfoList = subsetNames == null ? manifest.BundleInfos : manifest.CollectSubsetBundleInfoes(subsetNames);
-
-            for (int i = 0; i < bundleInfoList.Count; i++)
+            foreach (var manifest in manifests)
             {
-                var bundleInfo = bundleInfoList[i];
-                var uselocalBundle = s_LocalBundles.TryGetValue(bundleInfo.BundleName, out var localHash) && localHash == bundleInfo.Hash;
-                if (!uselocalBundle && !Caching.IsVersionCached(bundleInfo.AsCached))
-                    totalSize += bundleInfo.Size;
+                var bundleInfoList = subsetNames == null ? manifest.BundleInfos : manifest.CollectSubsetBundleInfoes(subsetNames);
+
+                for (int i = 0; i < bundleInfoList.Count; i++)
+                {
+                    var bundleInfo = bundleInfoList[i];
+                    var uselocalBundle = s_LocalBundles.TryGetValue(bundleInfo.BundleName, out var localHash) && localHash == bundleInfo.Hash;
+                    if (!uselocalBundle && !Caching.IsVersionCached(bundleInfo.AsCached))
+                        totalSize += bundleInfo.Size;
+                }
             }
 
             return totalSize;
@@ -414,15 +498,25 @@ namespace BundleSystem
                 result.SetCurrentIndex(i);
                 var bundleInfo = downloadBundleList[i];
 
+                if (TryGetRemoteURL(bundleInfo.packageGuid, out var remoteURL) == false)
+                {
+                    continue;
+                }
+
                 //remove from the set so we can track bundles that should be cleared
                 bundlesToUnload.Remove(bundleInfo.BundleName);
 
-                var islocalBundle = s_LocalBundles.TryGetValue(bundleInfo.BundleName, out var localHash) && localHash == bundleInfo.Hash;
+                var isLocalBundle = s_LocalBundles.TryGetValue(bundleInfo.BundleName, out var localHash) && localHash == bundleInfo.Hash;
                 var isCached = Caching.IsVersionCached(bundleInfo.AsCached);
                 result.SetCachedBundle(isCached);
 
-                var loadURL = islocalBundle ? Utility.CombinePath(LocalURL, bundleInfo.BundleName) : Utility.CombinePath(RemoteURL, bundleInfo.BundleName);
-                if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName}, loadURL {loadURL}, isLocalBundle : {islocalBundle}, isCached {isCached}");
+                var loadURL = isLocalBundle 
+                    ? TryGetLocalURL(bundleInfo.packageGuid, out var localUrl) 
+                        ? Utility.CombinePath(localUrl, bundleInfo.BundleName) 
+                        : null 
+                    : Utility.CombinePath(remoteURL, bundleInfo.BundleName);
+                
+                if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName}, loadURL {loadURL}, isLocalBundle : {isLocalBundle}, isCached {isCached}");
                 LoadedBundle previousBundle;
 
                 if (s_AssetBundles.TryGetValue(bundleInfo.BundleName, out previousBundle) && previousBundle.Hash == bundleInfo.Hash)
@@ -431,7 +525,7 @@ namespace BundleSystem
                 }
                 else
                 {
-                    var bundleReq = islocalBundle ? UnityWebRequestAssetBundle.GetAssetBundle(loadURL) : UnityWebRequestAssetBundle.GetAssetBundle(loadURL, bundleInfo.AsCached);
+                    var bundleReq = isLocalBundle ? UnityWebRequestAssetBundle.GetAssetBundle(loadURL) : UnityWebRequestAssetBundle.GetAssetBundle(loadURL, bundleInfo.AsCached);
                     var operation = bundleReq.SendWebRequest();
                     while (!bundleReq.isDone)
                     {
@@ -452,7 +546,7 @@ namespace BundleSystem
                         yield break;
                     }
 
-                    var loadedBundle = new LoadedBundle(bundleInfo, loadURL, null, islocalBundle);
+                    var loadedBundle = new LoadedBundle(bundleInfo, loadURL, null, isLocalBundle);
                     bundleRequests.Add(bundleInfo.BundleName, bundleReq);
                     loadedBundles.Add(bundleInfo.BundleName, loadedBundle);
                     if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName} Complete");
@@ -507,25 +601,28 @@ namespace BundleSystem
             if (LogMessages) Debug.Log($"CacheUsed After CleanUp : {Caching.defaultCache.spaceOccupied} bytes");
 
             PlayerPrefs.SetString("CachedManifest", JsonUtility.ToJson(manifest));
-            GlobalBundleHash = manifest.GlobalHash.ToString();
             result.Result = bundleReplaced;
             result.Done(BundleErrorCode.Success);
         }
-        
+
+        public static bool IsCached(AssetbundleBuildManifest target)
+        {
+            return target.BundleInfos.All(bundle => Caching.IsVersionCached(bundle.AsCached));
+        }
         
         /// <summary>
         /// acutally download assetbundles load from cache if cached 
         /// </summary>
-        /// <param name="manifest">manifest you get from GetManifest() function</param>
+        /// <param name="manifests">manifest you get from GetManifest() function</param>
         /// <param name="subsetNames">names that you interested among full bundle list(optional)</param>
-        public static BundleAsyncOperation<bool> DownloadAssetBundlesInBackground(AssetbundleBuildManifest manifest, IEnumerable<string> subsetNames = null)
+        public static BundleAsyncOperation<bool> DownloadAssetBundlesInBackground(AssetbundleBuildManifest[] manifests, IEnumerable<string> subsetNames = null)
         {
             var result = new BundleAsyncOperation<bool>();
-            s_Helper.StartCoroutine(CoDownloadAssetBundlesInBackground(manifest, subsetNames, result));
+            s_Helper.StartCoroutine(CoDownloadAssetBundlesInBackground(manifests, subsetNames, result));
             return result;
         }
 
-        static IEnumerator CoDownloadAssetBundlesInBackground(AssetbundleBuildManifest manifest, IEnumerable<string> subsetNames, BundleAsyncOperation<bool> result)
+        static IEnumerator CoDownloadAssetBundlesInBackground(AssetbundleBuildManifest[] manifests, IEnumerable<string> subsetNames, BundleAsyncOperation<bool> result)
         {
             if (!Initialized)
             {
@@ -543,7 +640,10 @@ namespace BundleSystem
 #endif
 
             var bundlesToUnload = new HashSet<string>(s_AssetBundles.Keys);
-            var downloadBundleList = subsetNames == null ? manifest.BundleInfos : manifest.CollectSubsetBundleInfoes(subsetNames);
+            var downloadBundleList = subsetNames == null 
+                ? manifests.SelectMany(manifest=>manifest.BundleInfos).ToList() 
+                : manifests.SelectMany(manifest=>manifest.CollectSubsetBundleInfoes(subsetNames)).ToList();
+            
             var bundleReplaced = false; //bundle has been replaced
             
             //temp dictionaries to apply very last
@@ -552,16 +652,27 @@ namespace BundleSystem
 
             result.SetIndexLength(downloadBundleList.Count);
 
-            string tempDownloadPath = Utility.CombinePath(Application.temporaryCachePath, "_assetBundles");
-            if (Directory.Exists(tempDownloadPath) == false)
+            const string downloadFolder = ".gameResourcesDownloadTemp";
+            string downloadFolderAbsolutePath = Utility.CombinePath(Application.persistentDataPath, downloadFolder);
+            if (Directory.Exists(downloadFolderAbsolutePath) == false)
             {
-                Directory.CreateDirectory(tempDownloadPath);
+                Directory.CreateDirectory(downloadFolderAbsolutePath);
             }
-
+            
+#if UNITY_IOS || UNITY_IPHONE
+            Device.SetNoBackupFlag(downloadFolderAbsolutePath);
+#endif
+            
             List<BackgroundDownloadConfig> settings = new List<BackgroundDownloadConfig>();
             for (int i = 0; i < downloadBundleList.Count; i++)
             {
                 var bundleInfo = downloadBundleList[i];
+                if (TryGetRemoteURL(bundleInfo.packageGuid, out var remoteUrl) == false)
+                {
+                    Debug.LogError($"Errored loading remote url from package id:{bundleInfo.packageGuid}");
+                    continue;
+                }
+                
                 var isLocalBundle = s_LocalBundles.TryGetValue(bundleInfo.BundleName, out var localHash) && localHash == bundleInfo.Hash;
                 if (isLocalBundle) continue; // exclude local bundle files.
                 
@@ -574,11 +685,13 @@ namespace BundleSystem
                 
                 settings.Add(new BackgroundDownloadConfig
                 {
-                    url = new Uri(Utility.CombinePath(RemoteURL, bundleInfo.BundleName)),
-                    filePath = Utility.CombinePath(tempDownloadPath, bundleInfo.BundleName),
+                    url = new Uri(Utility.CombinePath(remoteUrl, bundleInfo.BundleName)),
+                    filePath = Utility.CombinePath(downloadFolder, bundleInfo.BundleName),
                 });
             }
 
+            if(LogMessages) Debug.Log($"Download assets from {string.Join("\n",settings.Select(setting=>setting.url.ToString()))}");
+            
             var downloads = BackgroundDownload.Start(settings.ToArray());
             
             bool IsDownloading()
@@ -642,7 +755,7 @@ namespace BundleSystem
             }
             if (TryInterruptIfAnyFailure()) yield break;
             
-            if (LogMessages) Debug.Log($"Complete download files in background");
+            if (LogMessages) Debug.Log($"Complete download files in background ({downloads?.Length})");
             
             for (int i = 0; i < downloadBundleList.Count; i++)
             {
@@ -656,7 +769,12 @@ namespace BundleSystem
                 var isCached = Caching.IsVersionCached(bundleInfo.AsCached);
                 result.SetCachedBundle(isCached);
 
-                var loadURL = isLocalBundle ? Utility.CombinePath(LocalURL, bundleInfo.BundleName) : Utility.CombinePath(tempDownloadPath, bundleInfo.BundleName);
+                var loadURL = isLocalBundle 
+                    ? TryGetLocalURL(bundleInfo.packageGuid, out var localUrl) 
+                        ? Utility.CombinePath(localUrl, bundleInfo.BundleName) 
+                        : null 
+                    : Utility.CombinePath(downloadFolderAbsolutePath, bundleInfo.BundleName);
+
                 if (LogMessages) Debug.Log($"Loading Bundle Name : {bundleInfo.BundleName}, loadURL {loadURL}, isLocalBundle : {isLocalBundle}, isCached {isCached}");
 
                 if (s_AssetBundles.TryGetValue(bundleInfo.BundleName, out var previousBundle) && previousBundle.Hash == bundleInfo.Hash)
@@ -666,6 +784,7 @@ namespace BundleSystem
                 else
                 {
                     var bundleReq = isLocalBundle ? UnityWebRequestAssetBundle.GetAssetBundle(loadURL) : UnityWebRequestAssetBundle.GetAssetBundle($"file://{loadURL}", bundleInfo.AsCached);
+                    
                     var operation = bundleReq.SendWebRequest();
                     while (!bundleReq.isDone)
                     {
@@ -689,7 +808,7 @@ namespace BundleSystem
                     if (isLocalBundle == false)
                     {
                         // delete after cached.
-                        var filePath = Utility.CombinePath(tempDownloadPath, bundleInfo.BundleName);
+                        var filePath = Utility.CombinePath(downloadFolderAbsolutePath, bundleInfo.BundleName);
                         if (File.Exists(filePath))
                         {
                             File.Delete(filePath);
@@ -741,9 +860,10 @@ namespace BundleSystem
 
             //bump entire bundles' usage timestamp
             //we use manifest directly to find out entire list
-            for (int i = 0; i < manifest.BundleInfos.Count; i++)
+            for (int j = 0; j < manifests.Length; j++)
+            for (int i = 0; i < manifests[j].BundleInfos.Count; i++)
             {
-                var cachedInfo = manifest.BundleInfos[i].AsCached;
+                var cachedInfo = manifests[j].BundleInfos[i].AsCached;
                 if (Caching.IsVersionCached(cachedInfo)) Caching.MarkAsUsed(cachedInfo);
             }
 
@@ -751,8 +871,7 @@ namespace BundleSystem
             Caching.ClearCache(600); //as we bumped entire list right before clear, let it be just 600
             if (LogMessages) Debug.Log($"CacheUsed After CleanUp : {Caching.defaultCache.spaceOccupied} bytes");
 
-            PlayerPrefs.SetString("CachedManifest", JsonUtility.ToJson(manifest));
-            GlobalBundleHash = manifest.GlobalHash.ToString();
+            PlayerPrefs.SetString("CachedManifest", JsonUtility.ToJson(manifests));
             result.Result = bundleReplaced;
             result.Done(BundleErrorCode.Success);
         }

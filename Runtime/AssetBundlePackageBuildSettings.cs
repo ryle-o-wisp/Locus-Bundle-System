@@ -1,50 +1,18 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
+using Newtonsoft.Json;
+using UnityEditor;
 using UnityEngine;
 
 namespace BundleSystem
 {
-    [CreateAssetMenu(fileName = "AssetbundleBuildSettings.asset", menuName = "Create Assetbundle Build Settings", order = 999)]
-    public class AssetbundleBuildSettings : ScriptableObject
+    [CreateAssetMenu(fileName = "AssetBundlePackageBuildSettings.asset", menuName = "Create AssetBundle Build Settings", order = 999)]
+    public class AssetBundlePackageBuildSettings : ScriptableObject
     {
 #if UNITY_EDITOR
-        static AssetbundleBuildSettings s_EditorInstance = null;
-
-        public static AssetbundleBuildSettings EditorInstance
-        {
-            get
-            {
-                if (s_EditorInstance != null) return s_EditorInstance;
-
-                var defaultGUID = UnityEditor.EditorPrefs.GetString("LocusActiveBundleSetting", string.Empty);
-                var assetPath = UnityEditor.AssetDatabase.GUIDToAssetPath(defaultGUID);
-
-                if (!string.IsNullOrEmpty(assetPath))
-                {
-                    var found = UnityEditor.AssetDatabase.LoadAssetAtPath<AssetbundleBuildSettings>(assetPath);
-                    if(found != null)
-                    {
-                        s_EditorInstance = found;
-                        return s_EditorInstance;
-                    }
-                }
-
-                var assetPathes = UnityEditor.AssetDatabase.FindAssets("t:AssetbundleBuildSettings");
-                if (assetPathes.Length == 0) return null;
-
-                var guid = UnityEditor.AssetDatabase.GUIDToAssetPath(UnityEditor.AssetDatabase.GUIDToAssetPath(assetPathes[0]));
-                UnityEditor.EditorPrefs.GetString("LocusActiveBundleSetting", guid);
-                s_EditorInstance = UnityEditor.AssetDatabase.LoadAssetAtPath<AssetbundleBuildSettings>(UnityEditor.AssetDatabase.GUIDToAssetPath(assetPathes[0]));
-                return s_EditorInstance;
-            }
-            set
-            {
-                var assetPath = UnityEditor.AssetDatabase.GetAssetPath(value);
-                UnityEditor.EditorPrefs.SetString("LocusActiveBundleSetting", UnityEditor.AssetDatabase.AssetPathToGUID(assetPath));
-                s_EditorInstance = value;
-            }
-        }
-
         /// <summary>
         /// check setting is valid
         /// </summary>
@@ -82,30 +50,29 @@ namespace BundleSystem
             assetPath = string.Empty;
             return false;
         }
+
+        public string PackageGuid => AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(this));
 #endif
         public const string ManifestFileName = "Manifest.json";
+        public static string PackageListRuntimePath => "asset_bundle_groups";
+
+        public static string[] ReadRuntimePackageList()
+        {
+            var listAsset = Resources.Load<TextAsset>(PackageListRuntimePath);
+            return JsonConvert.DeserializeObject<List<string>>(listAsset.text)?.ToArray();
+        }
+        
         public static string LocalBundleRuntimePath => Application.streamingAssetsPath + "/localbundles/";
-        public string LocalOutputPath => Application.dataPath.Remove(Application.dataPath.Length - 6) + distributionProfile.localOutputFolder;
-        public string RemoteOutputPath => Application.dataPath.Remove(Application.dataPath.Length - 6) + distributionProfile.remoteOutputFolder;
 
         public List<BundleSetting> BundleSettings = new List<BundleSetting>();
 
         [Tooltip("Auto create shared bundles to remove duplicated assets")]
         public bool AutoCreateSharedBundles = true;
 
-        public AssetBundleDistributionProfile distributionProfile;
-        
-        [Tooltip("Use built asset bundles even in editor")]
-        public bool EmulateInEditor = false;
-
-        [Tooltip("Use Remote output folder when emulating remote bundles")]
-        public bool EmulateWithoutRemoteURL = false;
-
-        [Tooltip("Clean cache when initializing BundleManager for testing purpose")]
-        public bool CleanCacheInEditor = false;
+        [Tooltip("Download all remote assets at initial patch time")]
+        public bool DownloadAtInitialTime;
 
         //build cache server settings
-        public bool ForceRebuild = false;
         public bool UseCacheServer = false;
         public string CacheServerHost;
         public int CacheServerPort;

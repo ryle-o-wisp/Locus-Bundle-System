@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,6 +17,7 @@ namespace BundleSystem
         {
             public Dictionary<string, HashSet<string>> BundleDependencies;
             public List<AssetBundleBuild> SharedBundles;
+            public string[] Assets;
         }
 
         public static ProcessResult ProcessDependencyTree(List<AssetBundleBuild> definedBundles)
@@ -39,6 +41,7 @@ namespace BundleSystem
                     }
                     catch (Exception ex)
                     {
+                        Debug.LogException(ex);
                         Debug.LogError($@"Errored on building tree: {asset} is duplicated.");
                         throw;
                     }
@@ -62,7 +65,32 @@ namespace BundleSystem
                 resultList.Add(bundleDefinition);
             }
 
-            return new ProcessResult() { BundleDependencies = context.DependencyDic, SharedBundles = resultList };
+            string[] GetAllReferences()
+            {
+                var nodes = new List<Node>();
+                var visit = new HashSet<string>();
+                var q = new Queue<Node>();
+                foreach (var node in context.RootNodes.Values)
+                {
+                    q.Enqueue(node);
+                }
+
+                while (q.TryDequeue(out var seek))
+                {
+                    if (visit.Add(seek.Path))
+                    {
+                        nodes.Add(seek);
+                        foreach (var n in seek.Children.Values)
+                        {
+                            q.Enqueue(n);
+                        }
+                    }
+                }
+
+                return nodes.Select(n=>n.Path).ToArray();
+            }
+
+            return new ProcessResult() { BundleDependencies = context.DependencyDic, SharedBundles = resultList, Assets = GetAllReferences() };
         }
 
         //actual node tree context

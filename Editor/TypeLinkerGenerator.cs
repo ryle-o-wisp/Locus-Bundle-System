@@ -12,7 +12,7 @@ namespace BundleSystem
 {
     public static class TypeLinkerGenerator
     {
-        public static string Generate(AssetbundleBuildSettings settings, IBundleBuildResults result)
+        public static string Generate(AssetBundlePackageBuildSettings settings, IBundleBuildResults result)
         {
             var linkGenerator = new LinkXmlGenerator();
             foreach(var writeResult in result.WriteResults)

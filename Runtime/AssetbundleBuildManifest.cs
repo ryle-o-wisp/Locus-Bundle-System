@@ -44,6 +44,7 @@ namespace BundleSystem
 
             public List<string> Dependencies;
             public long Size;
+            public string packageGuid;
         }
 
         public List<BundleInfo> BundleInfos = new List<BundleInfo>();
@@ -54,6 +55,9 @@ namespace BundleSystem
         /// </summary>
         public long BuildTime;
         public string RemoteURL;
+        public string PackageName;
+        public string PackageGuid;
+        public bool DownloadAtInitialTime;
 
         [SerializeField]
         string m_GlobalHash;

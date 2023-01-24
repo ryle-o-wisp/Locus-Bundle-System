@@ -11,28 +11,30 @@ namespace BundleSystem
         static List<string> s_EmptyStringList = new List<string>();
         static string[] s_EmptyStringArray = new string[0];
         
-        public EditorAssetMap(AssetbundleBuildSettings settings)
+        public EditorAssetMap(AssetBundlePackageBuildSettings[] settings)
         {
             var assetPath = new List<string>();
             var loadPath = new List<string>();
-            foreach (var setting in settings.BundleSettings)
-            {
-                assetPath.Clear();
-                loadPath.Clear();
-                var folderPath = UnityEditor.AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
-                Utility.GetFilesInDirectory(string.Empty, assetPath, loadPath, folderPath, setting.IncludeSubfolder);
-                var assetList = new Dictionary<string, List<string>>();
-                for(int i = 0; i < assetPath.Count; i++)
+            
+            foreach(var package in settings)
+                foreach(var setting in package.BundleSettings)
                 {
-                    if(assetList.TryGetValue(loadPath[i], out var list))
+                    assetPath.Clear();
+                    loadPath.Clear();
+                    var folderPath = UnityEditor.AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
+                    Utility.GetFilesInDirectory(string.Empty, assetPath, loadPath, folderPath, setting.IncludeSubfolder);
+                    var assetList = new Dictionary<string, List<string>>();
+                    for(int i = 0; i < assetPath.Count; i++)
                     {
-                        list.Add(assetPath[i]);
-                        continue;
+                        if(assetList.TryGetValue(loadPath[i], out var list))
+                        {
+                            list.Add(assetPath[i]);
+                            continue;
+                        }
+                        assetList.Add(loadPath[i], new List<string>() { assetPath[i] });
                     }
-                    assetList.Add(loadPath[i], new List<string>() { assetPath[i] });
+                    m_Map.Add(setting.BundleName, assetList);
                 }
-                m_Map.Add(setting.BundleName, assetList);
-            }
         }
 
         public List<string> GetAssetPaths(string bundleName, string assetName)

@@ -7,7 +7,8 @@ using UnityEditor.Build.Pipeline.Interfaces;
 using UnityEditor.Build.Pipeline.WriteTypes;
 using UnityEngine;
 using System;
-using UnityEditor.VersionControl;
+using System.Text.RegularExpressions;
+using Object = UnityEngine.Object;
 
 namespace BundleSystem
 {
@@ -27,11 +28,11 @@ namespace BundleSystem
 
         class CustomBuildParameters : BundleBuildParameters
         {
-            public AssetbundleBuildSettings CurrentSettings;
+            public AssetBundlePackageBuildSettings CurrentSettings;
             public BuildType CurrentBuildType;
             public Dictionary<string, HashSet<string>> DependencyDic;
 
-            public CustomBuildParameters(AssetbundleBuildSettings settings, 
+            public CustomBuildParameters(AssetBundlePackageBuildSettings settings, 
                 BuildTarget target, 
                 BuildTargetGroup group, 
                 string outputFolder,
@@ -55,13 +56,99 @@ namespace BundleSystem
             }
         }
 
-        public static void BuildAssetBundles(BuildType buildType)
+        public static void BuildAssetBundles(AssetBundleBuildGlobalSettings globalSettings, PlatformType? targetPlatform = null)
         {
-            var editorInstance = AssetbundleBuildSettings.EditorInstance;
-            BuildAssetBundles(editorInstance, buildType);
+            if (globalSettings == null) throw new ArgumentNullException(nameof(globalSettings));
+            var globalSettingPath = AssetDatabase.GetAssetPath(globalSettings);
+            if (string.IsNullOrEmpty(globalSettingPath))
+            {
+                throw new ArgumentException(
+                    $"{globalSettings.name}({nameof(AssetBundleBuildGlobalSettings)}) is not a project asset");
+            }
+
+            AssetBundleBuildGlobalSettings GetGlobalSettings()
+            {
+                return AssetDatabase.LoadAssetAtPath<AssetBundleBuildGlobalSettings>(globalSettingPath);
+            }
+            
+            if (AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings == null)
+            {
+                throw new InvalidProgramException($"{nameof(AssetBundleBuildGlobalSettings)} not specified");
+            }
+
+            if (AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings.disallowCrossReference)
+            {
+                AssetsCrossReferenceValidator.AssertIfInvalid(globalSettings);
+            }
+            
+            UniquePackageNameValidator.AssertIfInvalid(globalSettings);
+
+            var distribution = globalSettings.profiles.FirstOrDefault(prof => prof.platform == targetPlatform);
+
+            if (distribution == null)
+            {
+                throw new InvalidProgramException(
+                    $"{globalSettings.name} does not contains distribution profile for {targetPlatform}");
+            }
+
+            foreach (var settings in globalSettings.GetActiveSettingEntries())
+            {
+                var settingPath = AssetDatabase.GetAssetPath(settings);
+                if (string.IsNullOrEmpty(settingPath))
+                    throw new ArgumentException($"{settings.name} in {globalSettings.name} is not a project asset");
+            }
+
+            foreach (var settings in globalSettings.GetActiveSettingEntries())
+            {
+                var settingPath = AssetDatabase.GetAssetPath(settings);
+                {
+                    var setSetting = AssetDatabase.LoadAssetAtPath<AssetBundlePackageBuildSettings>(settingPath);
+                    var inDistributionProfile = GetGlobalSettings().profiles.FirstOrDefault(prof => prof.platform == targetPlatform);
+                    BuildAssetBundles(setSetting, inDistributionProfile?.distributionProfile, BuildType.Local, false, targetPlatform);
+                }
+                {
+                    var setSetting = AssetDatabase.LoadAssetAtPath<AssetBundlePackageBuildSettings>(settingPath);
+                    var inDistributionProfile = GetGlobalSettings().profiles.FirstOrDefault(prof => prof.platform == targetPlatform);
+                    BuildAssetBundles(setSetting, inDistributionProfile?.distributionProfile, BuildType.Remote, false, targetPlatform);
+                }
+            }
+        }
+        
+        
+        public static void BuildAssetBundles(AssetBundleBuildGlobalSettings globalSettings, BuildType buildType, PlatformType? targetPlatform = null)
+        {
+            if (AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings == null)
+            {
+                throw new InvalidProgramException($"{nameof(AssetBundleBuildGlobalSettings)} not specified");
+            }
+
+            if (AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings.disallowCrossReference)
+            {
+                AssetsCrossReferenceValidator.AssertIfInvalid(globalSettings);
+            }
+
+            UniquePackageNameValidator.AssertIfInvalid(globalSettings);
+
+            var distribution = globalSettings.profiles.FirstOrDefault(prof => prof.platform == targetPlatform);
+
+            if (distribution == null)
+            {
+                throw new InvalidProgramException(
+                    $"{globalSettings.name} does not contains distribution profile for {targetPlatform}");
+            }
+            
+            foreach (var settings in globalSettings.GetActiveSettingEntries())
+            {
+                BuildAssetBundles(settings, distribution.distributionProfile, buildType, false, targetPlatform);
+            }
         }
 
-        public static void WriteExpectedSharedBundles(AssetbundleBuildSettings settings)
+        public static void WriteExpectedSharedBundles(AssetBundlePackageBuildSettings settings, string logPath=null)
+        {
+            WriteExpectedSharedBundles(new [] { settings }, logPath);
+        }
+        
+        public static void WriteExpectedSharedBundles(AssetBundlePackageBuildSettings[] settings, string logPath=null)
         {
             if(!Application.isBatchMode)
             {
@@ -79,13 +166,20 @@ namespace BundleSystem
             var prevScene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
             EditorPrefs.SetString(tempPrevSceneKey, prevScene.path);
 
-            var bundleList = GetAssetBundlesList(settings);
-            var treeResult = AssetDependencyTree.ProcessDependencyTree(bundleList);
-
-            WriteSharedBundleLog($"{Application.dataPath}/../", treeResult);
+            var logFilePath = GetExpectedSharedBundleFilesLogPath(logPath ?? $"{Application.dataPath}/../");
+            if(File.Exists(logFilePath)) File.Delete(logFilePath);
+            
+            foreach (var setting in settings)
+            {
+                var bundleList = GetAssetBundlesList(setting);
+                var treeResult = AssetDependencyTree.ProcessDependencyTree(bundleList);
+                WriteSharedBundleLog(logPath ?? $"{Application.dataPath}/../", treeResult);
+            }
+            
             if(!Application.isBatchMode)
             {
                 EditorUtility.DisplayDialog("Succeeded!", $"Check {LogExpectedSharedBundleFileName} in your project root directory!", "Confirm");
+                EditorUtility.RevealInFinder(logFilePath);
             }
 
             //domain reloaded, we need to restore previous scene path
@@ -101,7 +195,7 @@ namespace BundleSystem
             }
         }
 
-        public static List<AssetBundleBuild> GetAssetBundlesList(AssetbundleBuildSettings settings)
+        public static List<AssetBundleBuild> GetAssetBundlesList(AssetBundlePackageBuildSettings settings)
         {
             var bundleList = new List<AssetBundleBuild>();
 
@@ -141,8 +235,43 @@ namespace BundleSystem
             return bundleList;
         }
 
-        public static void BuildAssetBundles(AssetbundleBuildSettings settings, BuildType buildType)
+        public static void CleanBuiltAssetBundles(AssetBundlePackageBuildSettings[] settings, AssetBundleDistributionProfile distribution, BuildType buildType, BuildTarget buildTarget)
         {
+            foreach (var setting in settings)
+            {
+                if (buildType == BuildType.Local)
+                {
+                    var path = Path.Combine(Utility.GetLocalOutputPath(setting,distribution), $"{buildTarget}");
+                    if(Directory.Exists(path))
+                    {
+                        Directory.Delete(path, true);
+                    }
+                }
+                else if (buildType == BuildType.Remote)
+                {
+                    var path = Path.Combine(Utility.GetRemoteOutputPath(setting,distribution), $"{buildTarget}");
+                    if(Directory.Exists(path))
+                    {
+                        Directory.Delete(path, true);
+                    }
+                }
+            }
+        }
+
+        public static void BuildAssetBundles(AssetBundlePackageBuildSettings settings, AssetBundleDistributionProfile distributionProfile, BuildType buildType, bool guiInteractable = true, PlatformType? targetPlatform = null)
+        {
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
+            if (distributionProfile == null) throw new ArgumentNullException(nameof(distributionProfile));
+
+            var settingPath = AssetDatabase.GetAssetPath(settings);
+            var distributionProfilePath = AssetDatabase.GetAssetPath(distributionProfile);
+
+            if (string.IsNullOrWhiteSpace(settingPath))
+                throw new ArgumentException($"{settings.name}({nameof(AssetBundlePackageBuildSettings)}) is not a project asset");
+            
+            if (string.IsNullOrWhiteSpace(distributionProfilePath))
+                throw new ArgumentException($"{settings.name}({nameof(AssetBundleDistributionProfile)}) is not a project asset");
+            
             if(!Application.isBatchMode)
             {
                 //have to ask save current scene
@@ -155,14 +284,22 @@ namespace BundleSystem
                 }
             }
 
-            if (settings.distributionProfile == null) throw new InvalidProgramException("distribution profile is missing!");
-
+            BuildTarget buildTarget = default;
+            switch (targetPlatform)
+            {
+                case PlatformType.Android: buildTarget = BuildTarget.Android; break;
+                case PlatformType.IOS: buildTarget = BuildTarget.iOS; break;
+                
+                case null: 
+                default:
+                    buildTarget = EditorUserBuildSettings.activeBuildTarget;
+                    break;
+            }
             var bundleList = GetAssetBundlesList(settings);
 
-            var buildTarget = EditorUserBuildSettings.activeBuildTarget;
             var groupTarget = BuildPipeline.GetBuildTargetGroup(buildTarget);
 
-            var outputPath = Utility.CombinePath(buildType == BuildType.Local ? settings.LocalOutputPath : settings.RemoteOutputPath, buildTarget.ToString());
+            var outputPath = Utility.CombinePath(buildType == BuildType.Local ? Utility.GetLocalOutputPath(settings, distributionProfile) : Utility.GetRemoteOutputPath(settings, distributionProfile), buildTarget.ToString());
 
 
             //generate sharedBundle if needed, and pre generate dependency
@@ -175,7 +312,7 @@ namespace BundleSystem
 
             var buildParams = new CustomBuildParameters(settings, buildTarget, groupTarget, outputPath, treeResult.BundleDependencies, buildType);
 
-            buildParams.UseCache = !settings.ForceRebuild;
+            buildParams.UseCache = AssetBundleEditorPrefs.IncrementalBuild;
 
             if (buildParams.UseCache && settings.UseCacheServer)
             {
@@ -186,7 +323,10 @@ namespace BundleSystem
             ContentPipeline.BuildCallbacks.PostPackingCallback += PostPackingForSelectiveBuild;
             var returnCode = ContentPipeline.BuildAssetBundles(buildParams, new BundleBuildContent(bundleList.ToArray()), out var results);
             ContentPipeline.BuildCallbacks.PostPackingCallback -= PostPackingForSelectiveBuild;
-            
+
+            // after build. asset reference might be missed.
+            settings = AssetDatabase.LoadAssetAtPath<AssetBundlePackageBuildSettings>(settingPath);
+            distributionProfile = AssetDatabase.LoadAssetAtPath<AssetBundleDistributionProfile>(distributionProfilePath);
 
             if (returnCode == ReturnCode.Success)
             {
@@ -194,21 +334,21 @@ namespace BundleSystem
                 switch(buildType)
                 {
                     case BuildType.Local:
-                        WriteManifestFile(outputPath, results, buildTarget, settings.distributionProfile.remoteURL);
+                        WriteManifestFile(outputPath, results, buildTarget, Utility.GetRemoteURL(settings, distributionProfile), settings.name, settings.PackageGuid, settings.DownloadAtInitialTime);
                         WriteLogFile(outputPath, results);
-                        if(!Application.isBatchMode) EditorUtility.DisplayDialog("Build Succeeded!", "Local bundle build succeeded!", "Confirm");
+                        if(!Application.isBatchMode && guiInteractable) EditorUtility.DisplayDialog("Build Succeeded!", "Local bundle build succeeded!", "Confirm");
                         break;
                     case BuildType.Remote:
-                        WriteManifestFile(outputPath, results, buildTarget, settings.distributionProfile.remoteURL);
+                        WriteManifestFile(outputPath, results, buildTarget, Utility.GetRemoteURL(settings, distributionProfile), settings.name, settings.PackageGuid, settings.DownloadAtInitialTime);
                         WriteLogFile(outputPath, results);
                         var linkPath = TypeLinkerGenerator.Generate(settings, results);
-                        if (!Application.isBatchMode) EditorUtility.DisplayDialog("Build Succeeded!", $"Remote bundle build succeeded, \n {linkPath} updated!", "Confirm");
+                        if (!Application.isBatchMode && guiInteractable) EditorUtility.DisplayDialog("Build Succeeded!", $"Remote bundle build succeeded, \n {linkPath} updated!", "Confirm");
                         break;
                 }
             }
             else
             {
-                EditorUtility.DisplayDialog("Build Failed!", $"Bundle build failed, \n Code : {returnCode}", "Confirm");
+                if(!Application.isBatchMode && guiInteractable) EditorUtility.DisplayDialog("Build Failed!", $"Bundle build failed, \n Code : {returnCode}", "Confirm");
                 Debug.LogError(returnCode);
             }
         }
@@ -239,7 +379,6 @@ namespace BundleSystem
             //quick exit 
             if (includedBundles == null || includedBundles.Count == 0)
             {
-                Debug.Log("Nothing to build");
                 writeData.WriteOperations.Clear();
                 return ReturnCode.Success;
             }
@@ -277,7 +416,7 @@ namespace BundleSystem
         /// <summary>
         /// write manifest into target path.
         /// </summary>
-        static void WriteManifestFile(string path, IBundleBuildResults bundleResults, BuildTarget target, string remoteURL)
+        static void WriteManifestFile(string path, IBundleBuildResults bundleResults, BuildTarget target, string remoteURL, string packageName, string packageGuid, bool downloadAtInitialTime)
         {
             var manifest = new AssetbundleBuildManifest();
             manifest.BuildTarget = target.ToString();
@@ -292,6 +431,7 @@ namespace BundleSystem
                 bundleInfo.Dependencies = Utility.CollectBundleDependencies(deps, result.Key);
                 bundleInfo.Hash = result.Value.Hash;
                 bundleInfo.Size = new FileInfo(result.Value.FileName).Length;
+                bundleInfo.packageGuid = packageGuid;
                 manifest.BundleInfos.Add(bundleInfo);
             }
 
@@ -301,8 +441,11 @@ namespace BundleSystem
             manifest.GlobalHash = Hash128.Compute(manifestString);
             manifest.BuildTime = DateTime.UtcNow.Ticks;
             manifest.RemoteURL = remoteURL;
+            manifest.DownloadAtInitialTime = downloadAtInitialTime;
+            manifest.PackageName = packageName;
+            manifest.PackageGuid = packageGuid;
             if (!Directory.Exists(path)) Directory.CreateDirectory(path);
-            File.WriteAllText(Utility.CombinePath(path, AssetbundleBuildSettings.ManifestFileName), JsonUtility.ToJson(manifest, true));
+            File.WriteAllText(Utility.CombinePath(path, AssetBundlePackageBuildSettings.ManifestFileName), JsonUtility.ToJson(manifest, true));
         }
 
         static void WriteSharedBundleLog(string path, AssetDependencyTree.ProcessResult treeResult)
@@ -330,10 +473,20 @@ namespace BundleSystem
             }
 
             if (!Directory.Exists(path)) Directory.CreateDirectory(path);
-            File.WriteAllText(Utility.CombinePath(path, LogExpectedSharedBundleFileName), sb.ToString());
+            using var writer = File.AppendText(Utility.CombinePath(path, LogExpectedSharedBundleFileName));
+            writer.WriteLine(sb.ToString());
         }
 
-
+        public static string GetExpectedSharedBundleFilesLogPath(string folderPath)
+        {
+            return Path.GetFullPath(Utility.CombinePath(folderPath, LogExpectedSharedBundleFileName));
+        }
+        
+        public static string GetLogPath(string folderPath)
+        {
+            return Path.GetFullPath(Utility.CombinePath(folderPath, LogFileName));
+        }
+        
         /// <summary>
         /// write logs into target path.
         /// </summary>
@@ -375,7 +528,7 @@ namespace BundleSystem
             }
 
             if (!Directory.Exists(path)) Directory.CreateDirectory(path);
-            File.WriteAllText(Utility.CombinePath(path, LogFileName), sb.ToString());
+            File.WriteAllText(GetLogPath(path), sb.ToString());
         }
     }
 }

@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace BundleSystem
 {
-    [CreateAssetMenu(fileName = "new AssetBundleDistributionProfile", menuName = "Assets/AssetBundleDistributionProfile")]
+    [CreateAssetMenu(menuName = "Asset Bundle/Distribution Profile")]
     public class AssetBundleDistributionProfile : ScriptableObject
     {
         /// <summary>

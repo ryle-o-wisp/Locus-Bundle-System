@@ -12,36 +12,31 @@ namespace BundleSystem
     public static partial class BundleManager
     {
 #if UNITY_EDITOR
-        private static AssetbundleBuildSettings s_EditorBuildSettings;
+        private static AssetBundlePackageBuildSettings s_EditorBuildSettings;
         private static EditorAssetMap s_EditorAssetMap;
 
         static void SetupAssetdatabaseUsage()
         {
-
-            s_EditorBuildSettings = AssetbundleBuildSettings.EditorInstance;
-            if (s_EditorBuildSettings == null || !s_EditorBuildSettings.IsValid()) throw new System.Exception("AssetbundleBuildSetting is not valid");
-
-            if (s_EditorBuildSettings.CleanCacheInEditor)
+            if (AssetBundleEditorPrefs.CleanCacheInEditor)
             {
                 Caching.ClearCache();
             }
 
-            UseAssetDatabase = !s_EditorBuildSettings.EmulateInEditor;
+            UseAssetDatabase = !AssetBundleEditorPrefs.EmulateInEditor;
 
             //create editor asset map
             if(UseAssetDatabase)
             {
-                s_EditorAssetMap = new EditorAssetMap(s_EditorBuildSettings);
+                s_EditorAssetMap = new EditorAssetMap(AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings.GetActiveSettingEntries());
                 //set initialied so it does not need explit call initialzed when using aassetdatabase
                 Initialized = true;
             }
         }
 
-        public static void SetupApiTestSettings(AssetbundleBuildSettings settings = null)
+        public static void SetupApiTestSettings(AssetBundlePackageBuildSettings[] settings = null)
         {
-            if(Application.isPlaying) throw new System.Exception("This funcion cannot be called while playing!");
-            if(settings == null) settings = AssetbundleBuildSettings.EditorInstance;
-            if(settings == null || !settings.IsValid()) throw new System.Exception("AssetbundleBuildSetting is not valid");
+            if(Application.isPlaying) throw new System.Exception("This function cannot be called while playing!");
+            if(settings == null || settings.Any(setting => setting.IsValid() == false)) throw new System.Exception("AssetbundleBuildSetting is not valid");
             UseAssetDatabase = true;
             //create editor asset map only for testing
             s_EditorAssetMap = new EditorAssetMap(settings);
@@ -60,7 +55,7 @@ namespace BundleSystem
             {
                 EnsureAssetDatabase();
                 var assets = s_EditorAssetMap.GetAssetPaths(bundleName);
-                if (assets.Length == 0) return new T[0];
+                if (assets.Length == 0) return System.Array.Empty<T>();
 
                 var typeExpected = typeof(T);
                 var foundList = new List<T>(assets.Length);
@@ -309,11 +304,6 @@ namespace BundleSystem
             ReleaseBundleInternal(loadedBundle, 1);
         }
 
-        public static void LoadScene(BundledAssetPath path, LoadSceneMode mode)
-        {
-            LoadScene(path.BundleName, path.AssetName, mode);
-        }
-
         public static void LoadScene(string bundleName, string sceneName, LoadSceneMode mode)
         {
 #if UNITY_EDITOR
@@ -331,11 +321,6 @@ namespace BundleSystem
             SceneManager.LoadScene(Path.GetFileName(sceneName), mode);
         }
         
-        public static AsyncOperation LoadSceneAsync(BundledAssetPath path, LoadSceneMode mode)
-        {
-            return LoadSceneAsync(path.BundleName, path.AssetName, mode);
-        }
-
         public static AsyncOperation LoadSceneAsync(string bundleName, string sceneName, LoadSceneMode mode)
         {
 #if UNITY_EDITOR

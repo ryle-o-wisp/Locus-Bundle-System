@@ -122,6 +122,26 @@ namespace BundleSystem
             //remove duplicates and return
             return list.Distinct().ToArray(); 
         }
+        
+        public static string GetLocalOutputPath(AssetBundlePackageBuildSettings settings,
+            AssetBundleDistributionProfile distribution)
+        {
+            return Application.dataPath.Remove(Application.dataPath.Length - 6) +
+                   Path.Combine(distribution.localOutputFolder, settings.PackageGuid);
+        }
+        
+        public static string GetRemoteOutputPath(AssetBundlePackageBuildSettings settings,
+            AssetBundleDistributionProfile distribution)
+        {
+            return Application.dataPath.Remove(Application.dataPath.Length - 6) +
+                   Path.Combine(distribution.remoteOutputFolder, settings.PackageGuid);
+        }
+
+        public static string GetRemoteURL(AssetBundlePackageBuildSettings settings,
+            AssetBundleDistributionProfile distribution)
+        {
+            return Path.Combine(distribution.remoteURL, settings.PackageGuid);
+        }
     }
 #endif
 
