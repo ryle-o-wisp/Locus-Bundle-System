@@ -254,6 +254,15 @@ namespace BundleSystem
 namespace BundleSystem
 {
     [Serializable]
+    public sealed class BundledObjectReference : BundledAssetReference<Object>
+    {
+#if UNITY_EDITOR
+        [CustomPropertyDrawer(typeof(BundledObjectReference))]
+        public sealed class PropertyDrawer : BundledAssetReferenceDrawer<Object> {}
+#endif
+    }
+    
+    [Serializable]
     public sealed class BundledGameObjectReference : BundledAssetReference<GameObject>
     {
         #if UNITY_EDITOR
