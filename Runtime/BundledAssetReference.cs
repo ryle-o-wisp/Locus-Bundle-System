@@ -269,6 +269,137 @@ namespace BundleSystem
         [CustomPropertyDrawer(typeof(BundledGameObjectReference))]
         public sealed class PropertyDrawer : BundledAssetReferenceDrawer<GameObject> {}
         #endif
+
+        public GameObject Instantiate(Transform parent = null, bool worldPositionStays = false)
+        {
+            var prefab = this.LoadSync();
+            if (prefab.Asset == null)
+            {
+                throw new NullAssetReferencedException();
+            }
+
+            var instance = 
+                parent == null
+                ? Object.Instantiate(prefab.Asset)
+                : Object.Instantiate(prefab.Asset, parent, worldPositionStays);
+            
+            InstanceLifeCheckSentinel.Shared.RegisterDisposeOnGameObjectDestroyed(instance, prefab);
+            return instance;
+        }
+        
+        public InstanceAsyncOperator<GameObject, InstantiateError> InstantiateAsync(Transform parent = null, bool worldPositionStays = false)
+        {
+            var confirmation = InstanceAsyncOperator<GameObject, InstantiateError>.ConfirmationHandler.Create();
+            
+            IEnumerator Routine()
+            {
+                var prefab = this.LoadAsync();
+                while (prefab.IsDone == false) yield return null;
+
+                if (prefab.Asset == null)
+                {
+                    confirmation.Fault(InstantiateError.PREFAB_NOT_FOUND);
+                    prefab.Dispose();
+                    yield break;
+                }
+
+                var instance = 
+                    parent == null
+                        ? Object.Instantiate(prefab.Asset)
+                        : Object.Instantiate(prefab.Asset, parent, worldPositionStays);
+                
+                if (instance == null)
+                {
+                    confirmation.Fault(InstantiateError.INSTANTIATE_FAILURE);
+                    prefab.Dispose();
+                }
+                else
+                {
+                    InstanceLifeCheckSentinel.Shared.RegisterDisposeOnGameObjectDestroyed(instance, prefab);
+                    confirmation.Complete(instance);
+                }
+            }
+
+            CoroutineRunner.Shared.StartCoroutine(Routine());
+
+            return confirmation.Operator;
+        }
+    }
+    
+    public class NullAssetReferencedException : Exception {}
+
+    public enum InstantiateError
+    {
+        PREFAB_NOT_FOUND,
+        INSTANTIATE_FAILURE,
+    }
+
+    public class CoroutineRunner : MonoBehaviour
+    {
+        private static CoroutineRunner _shared = null;
+        public static CoroutineRunner Shared
+        {
+            get
+            {
+                if (_shared == null)
+                {
+                    var go = new GameObject(nameof(CoroutineRunner));
+                    DontDestroyOnLoad(go);
+                    _shared = go.AddComponent<CoroutineRunner>();
+                }
+                return _shared;
+            }
+        }
+    }
+
+    public class InstanceLifeCheckSentinel : MonoBehaviour
+    {
+        private static InstanceLifeCheckSentinel _shared = null;
+        public static InstanceLifeCheckSentinel Shared
+        {
+            get
+            {
+                if (_shared == null)
+                {
+                    var go = new GameObject(nameof(InstanceLifeCheckSentinel));
+                    DontDestroyOnLoad(go);
+                    _shared = go.AddComponent<InstanceLifeCheckSentinel>();
+                }
+                return _shared;
+            }
+        }
+
+        private class Entry
+        {
+            public GameObject target;
+            public IDisposable disposer;
+        }
+
+        private LinkedList<Entry> _list = new LinkedList<Entry>();
+        public void RegisterDisposeOnGameObjectDestroyed(GameObject target, IDisposable disposer)
+        {
+            _list.AddLast(new Entry
+            {
+                target = target,
+                disposer = disposer,
+            });
+        }
+
+        public void Update()
+        {
+            using var iteration = _list.GetEnumerator();
+            while (iteration.MoveNext())
+            {
+                var entry = iteration.Current;
+                if (entry == null) continue;
+                if (entry.target == null)
+                {
+                    _list.Remove(entry);
+                    entry.disposer?.Dispose();
+                    return;
+                }
+            }
+        }
     }
     
     [Serializable]
