@@ -13,6 +13,29 @@ namespace BundleSystem
     /// </summary>
     public static class AssetDependencyTree
     {
+        public class ProcessResults
+        {
+            public Dictionary<string, ProcessResult> ResultsBySettingPath = new Dictionary<string, ProcessResult>();
+        }
+
+        public static ProcessResults ProcessDependencyTree(AssetBundlePackageBuildSettings[] allSettings)
+        {
+            var results = new ProcessResults();
+            foreach (var setting in allSettings)
+            {
+                var settingPath = AssetDatabase.GetAssetPath(setting);
+                if (string.IsNullOrEmpty(settingPath))
+                {
+                    continue;
+                }
+                
+                var bundles = AssetbundleBuilder.GetAssetBundlesList(setting);
+                var result = ProcessDependencyTree(bundles);
+                results.ResultsBySettingPath[settingPath] = result;
+            }
+            return results;
+        }
+        
         public class ProcessResult
         {
             public Dictionary<string, HashSet<string>> BundleDependencies;

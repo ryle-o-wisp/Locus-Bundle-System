@@ -22,7 +22,7 @@ namespace BundleSystem
                     assetPath.Clear();
                     loadPath.Clear();
                     var folderPath = UnityEditor.AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
-                    Utility.GetFilesInDirectory(string.Empty, assetPath, loadPath, folderPath, setting.IncludeSubfolder);
+                    Utility.GetFilesInDirectory(string.Empty, assetPath, loadPath, folderPath, setting.IncludeSubfolder, Utility.BuildFileType.ALL);
                     var assetList = new Dictionary<string, List<string>>();
                     for(int i = 0; i < assetPath.Count; i++)
                     {
@@ -99,6 +99,24 @@ namespace BundleSystem
             }
         
             return assets[0];
+        }
+        
+        
+        public bool IsValidScene(string scenePath)
+        {
+            if (m_Map.Values.Any(entry => entry.Values.Any(list => list.Contains(scenePath))) == false)
+            {
+                Debug.LogError("Request scene name does not exist in streamed scenes : " + scenePath);
+                return false;
+            }
+
+            if (!Application.isPlaying)
+            {
+                Debug.LogError("Can't load scene while not playing : " + scenePath);
+                return false;
+            }
+        
+            return true;
         }
     }
 }

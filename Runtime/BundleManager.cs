@@ -49,7 +49,7 @@ namespace BundleSystem
             {
                 get
                 {
-                    if (Bundle != null && _pathCatalog == null)
+                    if (Bundle.isStreamedSceneAssetBundle == false && Bundle != null && _pathCatalog == null)
                     {
                         _pathCatalog = Bundle.LoadAsset<BundlePathCatalog>(nameof(BundlePathCatalog));
                     }
@@ -134,7 +134,6 @@ namespace BundleSystem
             LogMessages = default;
 
             //api defaults
-            s_EditorBuildSettings = default;
             s_EditorAssetMap = default;
 
             //memory defaults

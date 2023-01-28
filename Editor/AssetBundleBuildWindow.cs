@@ -13,7 +13,7 @@ public class AssetBundleBuildWindow : EditorWindow
     public static void ShowWindow () {
         EditorWindow.GetWindow(typeof(AssetBundleBuildWindow));
     }
-    
+
     void OnGUI ()
     {
         EditorGUILayout.BeginHorizontal();
@@ -104,7 +104,6 @@ public class AssetBundleBuildWindow : EditorWindow
                  {
                      (MenuName: "Android", MenuAction: (GenericMenu.MenuFunction)delegate()
                      {
-                         var settings = AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings;
                          AssetbundleBuilder.BuildAssetBundles(AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings, PlatformType.Android);
                      }),
                      (MenuName: "iOS", MenuAction: (GenericMenu.MenuFunction)delegate()

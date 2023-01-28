@@ -1,9 +1,11 @@
 ﻿
 
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Networking;
+using Object = UnityEngine.Object;
 
 namespace BundleSystem
 {
@@ -23,10 +25,17 @@ namespace BundleSystem
             return mainType != null && mainType != typeof(MonoScript) && mainType.IsSubclassOf(typeof(Object));
         }
 
+        public enum BuildFileType
+        {
+            ALL,
+            ASSETS,
+            SCENES,
+        }
+
         /// <summary>
         /// Search files in directory
         /// </summary>
-        public static void GetFilesInDirectory(string dirPrefix, List<string> resultAssetPath, List<string> resultLoadPath, string folderPath, bool includeSubdir)
+        public static void GetFilesInDirectory(string dirPrefix, List<string> resultAssetPath, List<string> resultLoadPath, string folderPath, bool includeSubdir, BuildFileType fileType)
         {
             var dir = new DirectoryInfo(Path.GetFullPath(folderPath));
             var files = dir.GetFiles();
@@ -36,8 +45,15 @@ namespace BundleSystem
                 var unityPath = Utility.CombinePath(folderPath, currentFile.Name);
                 if (!IsAssetCanBundled(unityPath)) continue;
 
-                resultAssetPath.Add(unityPath);
-                resultLoadPath.Add(Utility.CombinePath(dirPrefix, unityPath));
+                var isScene = currentFile.Extension == ".unity";
+                
+                if (fileType == BuildFileType.ALL ||
+                    (fileType == BuildFileType.SCENES && isScene) ||
+                    (fileType == BuildFileType.ASSETS && !isScene))
+                {
+                    resultAssetPath.Add(unityPath);
+                    resultLoadPath.Add(Utility.CombinePath(dirPrefix, unityPath));
+                }
             }
 
             if (includeSubdir)
@@ -45,7 +61,7 @@ namespace BundleSystem
                 foreach (var subDir in dir.GetDirectories())
                 {
                     var subdirName = $"{folderPath}/{subDir.Name}";
-                    GetFilesInDirectory(Utility.CombinePath(dirPrefix, subDir.Name), resultAssetPath, resultLoadPath, subdirName, includeSubdir);
+                    GetFilesInDirectory(Utility.CombinePath(dirPrefix, subDir.Name), resultAssetPath, resultLoadPath, subdirName, includeSubdir, fileType);
                 }
             }
         }

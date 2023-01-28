@@ -229,6 +229,18 @@ namespace BundleSystem
                     }
                 }
             }
+
+            if (result.Count == 0)
+            {
+                if (assetFileExists)
+                {
+                    AssetDatabase.DeleteAsset(catalogFilePath);
+                    AssetDatabase.SaveAssets();
+                }
+                // dont create if 0 size.
+                return null;
+            }
+            
             catalogAsset.entries = result.ToArray();
             EditorUtility.SetDirty(catalogAsset);
             if (assetFileExists == false)

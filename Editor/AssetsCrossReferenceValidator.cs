@@ -10,13 +10,17 @@ namespace BundleSystem
 {
     public static class AssetsCrossReferenceValidator
     {
-        private static IEnumerable<(string assetPath, string[] relatedSettings)> FindCrossReferencedAssets(AssetBundlePackageBuildSettings[] allSettings)
+        private static IEnumerable<(string assetPath, string[] relatedSettings)> FindCrossReferencedAssets(AssetBundlePackageBuildSettings[] allSettings, AssetDependencyTree.ProcessResults dependency = null)
         {
+            dependency ??= AssetDependencyTree.ProcessDependencyTree(allSettings);
             Dictionary<string, List<string>> usedMap = new Dictionary<string, List<string>>();
             foreach (var settings in allSettings)
             {
-                var bundles = AssetbundleBuilder.GetAssetBundlesList(settings);
-                var treeResult = AssetDependencyTree.ProcessDependencyTree(bundles);
+                var settingPath = AssetDatabase.GetAssetPath(settings);
+                if (dependency.ResultsBySettingPath.TryGetValue(settingPath, out var treeResult) == false)
+                {
+                    continue;
+                }
 
                 foreach (var asset in treeResult.Assets)
                 {
@@ -38,7 +42,7 @@ namespace BundleSystem
             }
         }
         
-        public static void AssertIfInvalid(AssetBundleBuildGlobalSettings settings)
+        public static void AssertIfInvalid(AssetBundleBuildGlobalSettings settings, AssetDependencyTree.ProcessResults dependency = null)
         {
             var allSettings = settings.GetActiveSettingEntries();
             var foundPattern = FindCrossReferencedAssets(allSettings).ToArray();

@@ -76,9 +76,11 @@ namespace BundleSystem
                 throw new InvalidProgramException($"{nameof(AssetBundleBuildGlobalSettings)} not specified");
             }
 
+            var dependencyTree = AssetDependencyTree.ProcessDependencyTree(globalSettings.GetActiveSettingEntries());
+
             if (AssetBundleEditorPrefs.AssetBundleBuildGlobalSettings.disallowCrossReference)
             {
-                AssetsCrossReferenceValidator.AssertIfInvalid(globalSettings);
+                AssetsCrossReferenceValidator.AssertIfInvalid(globalSettings, dependencyTree);
             }
             
             UniquePackageNameValidator.AssertIfInvalid(globalSettings);
@@ -91,6 +93,8 @@ namespace BundleSystem
                     $"{globalSettings.name} does not contains distribution profile for {targetPlatform}");
             }
 
+            globalSettings = GetGlobalSettings();
+
             foreach (var settings in globalSettings.GetActiveSettingEntries())
             {
                 var settingPath = AssetDatabase.GetAssetPath(settings);
@@ -98,18 +102,19 @@ namespace BundleSystem
                     throw new ArgumentException($"{settings.name} in {globalSettings.name} is not a project asset");
             }
 
-            foreach (var settings in globalSettings.GetActiveSettingEntries())
+            var activeSettings = globalSettings.GetActiveSettingEntries();
+            foreach (var settings in activeSettings)
             {
                 var settingPath = AssetDatabase.GetAssetPath(settings);
                 {
                     var setSetting = AssetDatabase.LoadAssetAtPath<AssetBundlePackageBuildSettings>(settingPath);
                     var inDistributionProfile = GetGlobalSettings().profiles.FirstOrDefault(prof => prof.platform == targetPlatform);
-                    BuildAssetBundles(setSetting, inDistributionProfile?.distributionProfile, BuildType.Local, false, targetPlatform);
+                    BuildAssetBundles(setSetting, inDistributionProfile?.distributionProfile, BuildType.Local, false, targetPlatform, dependency: dependencyTree);
                 }
                 {
                     var setSetting = AssetDatabase.LoadAssetAtPath<AssetBundlePackageBuildSettings>(settingPath);
                     var inDistributionProfile = GetGlobalSettings().profiles.FirstOrDefault(prof => prof.platform == targetPlatform);
-                    BuildAssetBundles(setSetting, inDistributionProfile?.distributionProfile, BuildType.Remote, false, targetPlatform);
+                    BuildAssetBundles(setSetting, inDistributionProfile?.distributionProfile, BuildType.Remote, false, targetPlatform, dependency: dependencyTree);
                 }
             }
         }
@@ -209,27 +214,44 @@ namespace BundleSystem
                 var catalogPath = AssetDatabase.GetAssetPath(catalog);
 
                 //collect assets
-                var assetPaths = new List<string>();
-                var loadPaths = new List<string>();
-                Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder);
-                if (assetPaths.Count == 0) Debug.LogWarning($"Could not found Any Assets {folderPath} for {setting.BundleName}");
-
-                var catalogIndex = assetPaths.IndexOf(catalogPath);
-                if (catalogIndex >= 0)
                 {
-                    assetPaths.RemoveAt(catalogIndex);
-                    loadPaths.RemoveAt(catalogIndex);
+                    var assetPaths = new List<string>();
+                    var loadPaths = new List<string>();
+                    Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder, Utility.BuildFileType.ASSETS);
+
+                    var catalogIndex = assetPaths.IndexOf(catalogPath);
+                    if (catalogIndex >= 0)
+                    {
+                        assetPaths.RemoveAt(catalogIndex);
+                        loadPaths.RemoveAt(catalogIndex);
+                        assetPaths.Insert(0, catalogPath);
+                        loadPaths.Insert(0, nameof(BundlePathCatalog) );
+                    }
+
+                    if (assetPaths.Count > 1) // BundlePathCatalog always exists.
+                    {
+                        var newBundle = new AssetBundleBuild();
+                        newBundle.assetBundleName = Path.GetExtension(setting.BundleName) == ".bundle" ? setting.BundleName : $"{setting.BundleName}.bundle";
+                        newBundle.assetNames = assetPaths.ToArray();
+                        newBundle.addressableNames = loadPaths.ToArray();
+                        bundleList.Add(newBundle);
+                    }
                 }
 
-                assetPaths.Insert(0, catalogPath);
-                loadPaths.Insert(0, nameof(BundlePathCatalog) );
+                {
+                    var scenePaths = new List<string>();
+                    var loadScenePaths = new List<string>();
+                    Utility.GetFilesInDirectory(string.Empty, scenePaths, loadScenePaths, folderPath, setting.IncludeSubfolder, Utility.BuildFileType.SCENES);
 
-                //make assetbundlebuild
-                var newBundle = new AssetBundleBuild();
-                newBundle.assetBundleName = setting.BundleName;
-                newBundle.assetNames = assetPaths.ToArray();
-                newBundle.addressableNames = loadPaths.ToArray();
-                bundleList.Add(newBundle);
+                    if (scenePaths.Count > 0)
+                    {
+                        var newBundle = new AssetBundleBuild();
+                        newBundle.assetBundleName = $"{Path.GetFileNameWithoutExtension(setting.BundleName)}.scenes.bundle";
+                        newBundle.assetNames = scenePaths.ToArray();
+                        newBundle.addressableNames = loadScenePaths.ToArray();
+                        bundleList.Add(newBundle);
+                    }
+                }
             }
 
             return bundleList;
@@ -258,7 +280,7 @@ namespace BundleSystem
             }
         }
 
-        public static void BuildAssetBundles(AssetBundlePackageBuildSettings settings, AssetBundleDistributionProfile distributionProfile, BuildType buildType, bool guiInteractable = true, PlatformType? targetPlatform = null)
+        public static void BuildAssetBundles(AssetBundlePackageBuildSettings settings, AssetBundleDistributionProfile distributionProfile, BuildType buildType, bool guiInteractable = true, PlatformType? targetPlatform = null, AssetDependencyTree.ProcessResults dependency = null)
         {
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             if (distributionProfile == null) throw new ArgumentNullException(nameof(distributionProfile));
@@ -295,15 +317,17 @@ namespace BundleSystem
                     buildTarget = EditorUserBuildSettings.activeBuildTarget;
                     break;
             }
+            
             var bundleList = GetAssetBundlesList(settings);
 
             var groupTarget = BuildPipeline.GetBuildTargetGroup(buildTarget);
 
             var outputPath = Utility.CombinePath(buildType == BuildType.Local ? Utility.GetLocalOutputPath(settings, distributionProfile) : Utility.GetRemoteOutputPath(settings, distributionProfile), buildTarget.ToString());
 
-
             //generate sharedBundle if needed, and pre generate dependency
-            var treeResult = AssetDependencyTree.ProcessDependencyTree(bundleList);
+            var treeResult = (dependency != null && dependency.ResultsBySettingPath.TryGetValue(settingPath, out var preprocessedTreeResult)) 
+                ? preprocessedTreeResult 
+                : AssetDependencyTree.ProcessDependencyTree(bundleList);
 
             if (settings.AutoCreateSharedBundles)
             {

@@ -10,9 +10,9 @@ namespace BundleSystem
             switch (self)
             {
                 case BuildTarget.Android:
-                    return PlatformType.Android; break;
+                    return PlatformType.Android;
                 case BuildTarget.iOS:
-                    return PlatformType.IOS; break;
+                    return PlatformType.IOS;
                 default: return default;
             }
         } 
