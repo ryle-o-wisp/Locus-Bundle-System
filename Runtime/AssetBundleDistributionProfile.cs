@@ -17,7 +17,7 @@ namespace BundleSystem
         /// </summary>
         [SerializeField]
         [Tooltip("Local bundle build output folder")]
-        public string localOutputFolder = "Assets/StreamingAssets/BuiltInAssets";
+        public string localOutputFolder = "LocalBundles";
 
         [Tooltip("Remote URL for downloading remote bundles")]
         public string remoteURL = "http://localhost/";
