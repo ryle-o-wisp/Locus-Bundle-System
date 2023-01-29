@@ -103,18 +103,23 @@ namespace BundleSystem
         private static void UntrackObjectInternal(Object obj)
         {
             var id = obj.GetInstanceID();
-            if (s_TrackingObjects.TryGetValue(id, out var trackingObject))
+            UntrackObjectInternal(id);
+        }
+        
+        private static void UntrackObjectInternal(int instanceId)
+        {
+            if (s_TrackingObjects.TryGetValue(instanceId, out var trackingObject))
             {
                 trackingObject.RefCount--;
                 if (trackingObject.RefCount <= 0)
                 {
-                    s_TrackingObjects.Remove(id);
+                    s_TrackingObjects.Remove(instanceId);
                     ReleaseBundleInternal(trackingObject.Bundle, 1);
                     s_WeakRefPool.Push(trackingObject.WeakRef);
                 }
                 else
                 {
-                    s_TrackingObjects[id] = trackingObject; //update
+                    s_TrackingObjects[instanceId] = trackingObject; //update
                 }
             }
             else
@@ -136,6 +141,14 @@ namespace BundleSystem
             if (UseAssetDatabase) return;
 #endif
             UntrackObjectInternal(obj);
+        }
+        
+        public static void ReleaseObject(int objectInstanceId)
+        {
+#if UNITY_EDITOR
+            if (UseAssetDatabase) return;
+#endif
+            UntrackObjectInternal(objectInstanceId);
         }
 
         public static T TrackObjectWithOwner<T>(GameObject owner, T loaded) where T : Object

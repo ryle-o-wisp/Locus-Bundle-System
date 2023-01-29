@@ -615,6 +615,7 @@ namespace BundleSystem
     {
         AssetBundleRequest mRequest;
         T mLoadedAsset;
+        private int? _loadedAssetInstanceId;
         private readonly string _subAssetName;
 
         /// <summary>
@@ -643,6 +644,7 @@ namespace BundleSystem
         public BundleRequest(T loadedAsset, bool releaseObjectOnDispose = false)
         {
             mLoadedAsset = loadedAsset;
+            _loadedAssetInstanceId = loadedAsset != null ? loadedAsset.GetInstanceID() : null;
             _subAssetName = null;
             _releaseObjectOnDispose = releaseObjectOnDispose;
         }
@@ -672,7 +674,10 @@ namespace BundleSystem
             }
             else if (_releaseObjectOnDispose)
             {
-                BundleManager.ReleaseObject(mLoadedAsset);
+                if (_loadedAssetInstanceId.HasValue)
+                {
+                    BundleManager.ReleaseObject(_loadedAssetInstanceId.Value);
+                }
             }
         }
 
