@@ -43,7 +43,7 @@ namespace BundleSystem
         /// <summary>
         /// Search files in directory
         /// </summary>
-        public static void GetFilesInDirectory(string dirPrefix, List<string> resultAssetPath, List<string> resultLoadPath, string folderPath, bool includeSubdir, string[] otherTerritories, BuildFileType fileType)
+        public static void GetFilesInDirectory(string dirPrefix, List<string> resultAssetPath, string folderPath, bool includeSubdir, string[] otherTerritories, BuildFileType fileType)
         {
             var dir = new DirectoryInfo(Path.GetFullPath(folderPath));
             var files = dir.GetFiles().OrderBy(f=>f.FullName).ToArray();
@@ -63,7 +63,6 @@ namespace BundleSystem
                     if (asset is BundlePathCatalog == false)
                     {
                         resultAssetPath.Add(unityPath);
-                        resultLoadPath.Add(Utility.CombinePath(dirPrefix, unityPath));
                     }
                 }
             }
@@ -75,7 +74,7 @@ namespace BundleSystem
                     var subDirName = $"{folderPath}/{subDir.Name}";
                     if ((otherTerritories?.Contains(subDirName) ?? false) == false)
                     {
-                        GetFilesInDirectory(Utility.CombinePath(dirPrefix, subDir.Name), resultAssetPath, resultLoadPath, subDirName, includeSubdir, otherTerritories, fileType);
+                        GetFilesInDirectory(Utility.CombinePath(dirPrefix, subDir.Name), resultAssetPath, subDirName, includeSubdir, otherTerritories, fileType);
                     }
                 }
             }

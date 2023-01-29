@@ -17,7 +17,6 @@ namespace BundleSystem
         public EditorAssetMap(AssetBundlePackageBuildSettings[] settings)
         {
             var assetPath = new List<string>();
-            var loadPath = new List<string>();
 
             foreach (var package in settings)
             {
@@ -32,19 +31,18 @@ namespace BundleSystem
                 foreach(var setting in package.BundleSettings)
                 {
                     assetPath.Clear();
-                    loadPath.Clear();
                     var folderPath = UnityEditor.AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
                     var subTerritory = allFolderPaths.Where(path => path.StartsWith(folderPath)).ToArray();
-                    Utility.GetFilesInDirectory(string.Empty, assetPath, loadPath, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ALL);
+                    Utility.GetFilesInDirectory(string.Empty, assetPath, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ALL);
                     var assetList = new Dictionary<string, List<string>>();
                     for(int i = 0; i < assetPath.Count; i++)
                     {
-                        if(assetList.TryGetValue(loadPath[i], out var list))
+                        if(assetList.TryGetValue(assetPath[i], out var list))
                         {
                             list.Add(assetPath[i]);
                             continue;
                         }
-                        assetList.Add(loadPath[i], new List<string>() { assetPath[i] });
+                        assetList.Add(assetPath[i], new List<string>() { assetPath[i] });
                     }
                     m_Map.Add(setting.BundleName, assetList);
                 }

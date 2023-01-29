@@ -229,8 +229,7 @@ namespace BundleSystem
                 if (setting.SeparateBundlesFileByFile)
                 {
                     var assetPaths = new List<string>();
-                    var loadPaths = new List<string>();
-                    Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ASSETS);
+                    Utility.GetFilesInDirectory(string.Empty, assetPaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ASSETS);
 
                     for (int i = 0, l = assetPaths.Count; i < l; i++)
                     {
@@ -239,7 +238,7 @@ namespace BundleSystem
                         var catalogPath = AssetDatabase.GetAssetPath(catalog);
 
                         var separatedAssetPaths = new[] {catalogPath, assetFilePath};
-                        var separatedAddressableNames = new[] {nameof(BundlePathCatalog), loadPaths[i]};
+                        var separatedAddressableNames = new[] {nameof(BundlePathCatalog), assetFilePath};
                         var assetGuid = AssetDatabase.AssetPathToGUID(separatedAssetPaths[1]);
                         var assetName = Path.GetFileNameWithoutExtension(separatedAssetPaths[1]);
                         var bundleName = GetSeparatedBundleAssetName(setting.BundleName, assetName, assetGuid);
@@ -256,33 +255,30 @@ namespace BundleSystem
                     var catalog = BundlePathCatalog.BuildOrUpdateFromFolder(folderPath);
                     var catalogPath = AssetDatabase.GetAssetPath(catalog);
                     var assetPaths = new List<string>();
-                    var loadPaths = new List<string>();
-                    Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ASSETS);
+                    Utility.GetFilesInDirectory(string.Empty, assetPaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ASSETS);
 
                     assetPaths.Insert(0, catalogPath);
-                    loadPaths.Insert(0, nameof(BundlePathCatalog) );
 
                     if (assetPaths.Count > 1) // BundlePathCatalog always exists.
                     {
                         var newBundle = new AssetBundleBuild();
                         newBundle.assetBundleName = Utility.GetBundleNameWithExtension(setting.BundleName);
                         newBundle.assetNames = assetPaths.ToArray();
-                        newBundle.addressableNames = loadPaths.ToArray();
+                        newBundle.addressableNames = assetPaths.ToArray();
                         bundleList.Add(newBundle);
                     }
                 }
 
                 {
                     var scenePaths = new List<string>();
-                    var loadScenePaths = new List<string>();
-                    Utility.GetFilesInDirectory(string.Empty, scenePaths, loadScenePaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.SCENES);
+                    Utility.GetFilesInDirectory(string.Empty, scenePaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.SCENES);
 
                     if (scenePaths.Count > 0)
                     {
                         var newBundle = new AssetBundleBuild();
                         newBundle.assetBundleName = $"{Path.GetFileNameWithoutExtension(setting.BundleName)}.scenes.bundle";
                         newBundle.assetNames = scenePaths.ToArray();
-                        newBundle.addressableNames = loadScenePaths.ToArray();
+                        newBundle.addressableNames = scenePaths.ToArray();
                         bundleList.Add(newBundle);
                     }
                 }
@@ -423,7 +419,6 @@ namespace BundleSystem
             if(customBuildParams.CurrentBuildType == BuildType.Local)
             {
                 var assetPaths = new List<string>();
-                var loadPaths = new List<string>();
                 
                 var allFolderPaths = customBuildParams.CurrentSettings.BundleSettings.Select(setting =>
                 {
@@ -444,8 +439,7 @@ namespace BundleSystem
                             var subTerritory = allFolderPaths.Where(path => path.StartsWith(folderPath)).ToArray();
 
                             assetPaths.Clear();
-                            loadPaths.Clear();
-                            Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ASSETS);
+                            Utility.GetFilesInDirectory(string.Empty, assetPaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ASSETS);
                             var bundleName = Utility.GetBundleNameWithExtension(setting.BundleName);
                             
                             return assetPaths.Select(assetPath =>
