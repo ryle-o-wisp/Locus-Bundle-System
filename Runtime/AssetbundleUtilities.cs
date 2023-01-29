@@ -46,7 +46,7 @@ namespace BundleSystem
         public static void GetFilesInDirectory(string dirPrefix, List<string> resultAssetPath, List<string> resultLoadPath, string folderPath, bool includeSubdir, string[] otherTerritories, BuildFileType fileType)
         {
             var dir = new DirectoryInfo(Path.GetFullPath(folderPath));
-            var files = dir.GetFiles();
+            var files = dir.GetFiles().OrderBy(f=>f.FullName).ToArray();
             for (int i = 0; i < files.Length; i++)
             {
                 var currentFile = files[i];
@@ -59,8 +59,12 @@ namespace BundleSystem
                     (fileType == BuildFileType.SCENES && isScene) ||
                     (fileType == BuildFileType.ASSETS && !isScene))
                 {
-                    resultAssetPath.Add(unityPath);
-                    resultLoadPath.Add(Utility.CombinePath(dirPrefix, unityPath));
+                    var asset = AssetDatabase.LoadAssetAtPath<Object>(unityPath);
+                    if (asset is BundlePathCatalog == false)
+                    {
+                        resultAssetPath.Add(unityPath);
+                        resultLoadPath.Add(Utility.CombinePath(dirPrefix, unityPath));
+                    }
                 }
             }
 
@@ -90,13 +94,20 @@ namespace BundleSystem
 
         static void CollectBundleDependenciesRecursive<T>(HashSet<string> result, Dictionary<string, T> deps, string name, string rootName) where T : IEnumerable<string>
         {
-            var bundleNameWithExtension = GetBundleNameWithExtension(name);
-            foreach (var dependency in deps[bundleNameWithExtension])
+            try
             {
-                //skip root name to prevent cyclic deps calculation
-                if (rootName == dependency) continue;
-                if (result.Add(dependency))
-                    CollectBundleDependenciesRecursive(result, deps, dependency, rootName);
+                var bundleNameWithExtension = GetBundleNameWithExtension(name);
+                foreach (var dependency in deps[bundleNameWithExtension])
+                {
+                    //skip root name to prevent cyclic deps calculation
+                    if (rootName == dependency) continue;
+                    if (result.Add(dependency))
+                        CollectBundleDependenciesRecursive(result, deps, dependency, rootName);
+                }
+            }
+            catch (Exception)
+            {
+                throw;
             }
         }
 

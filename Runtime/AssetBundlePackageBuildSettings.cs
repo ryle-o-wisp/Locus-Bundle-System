@@ -96,6 +96,8 @@ namespace BundleSystem
         public bool IncludeSubfolder = false;
         [Tooltip("Works only for remote bundle, true for LMZA, false for LZ4")]
         public bool CompressBundle = true;
+        [Tooltip("Separate bundles file by file.")]
+        public bool SeparateBundlesFileByFile = false;
     }
 }
 

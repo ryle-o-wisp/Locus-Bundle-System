@@ -12,6 +12,8 @@ namespace BundleSystem
 {
     public class BundlePathCatalog : ScriptableObject
     {
+        public bool isCatalogForSingleFile;
+        
         [Serializable]
         public struct Entry
         {
@@ -188,10 +190,10 @@ namespace BundleSystem
         [MenuItem("Build/Internal/Update Path Catalog")]
         public static void BuildWholeProjectRefeferences()
         {
-            BuildOrUpdate("Assets");
+            BuildOrUpdateFromFolder("Assets");
         }
         
-        public static BundlePathCatalog BuildOrUpdate(string path)
+        public static BundlePathCatalog BuildOrUpdateFromFolder(string path)
         {
             var catalogFilePath = Path.Combine(path, CatalogName);
             var catalogAsset = AssetDatabase.LoadAssetAtPath<BundlePathCatalog>(catalogFilePath);
@@ -251,6 +253,80 @@ namespace BundleSystem
             
             return catalogAsset;
         }
+        
+        public static BundlePathCatalog BuildOrUpdateFromFile(string path)
+        {
+            var fileAssetGuid = AssetDatabase.AssetPathToGUID(path);
+            if (string.IsNullOrEmpty(fileAssetGuid)) throw new ArgumentException($"{path} is not a project asset");
+            var catalogFilePath = GetSingleFileBundlePath(path, fileAssetGuid);
+            var catalogAsset = AssetDatabase.LoadAssetAtPath<BundlePathCatalog>(catalogFilePath);
+            bool assetFileExists = catalogAsset != null;
+            if (catalogAsset == null)
+            {
+                catalogAsset = CreateInstance<BundlePathCatalog>();
+            }
+            catalogAsset.isCatalogForSingleFile = true;
+            
+            List<Entry> result = new List<Entry>();
+            var extension = Path.GetExtension(path);
+            if (ExcludeExtensions.Contains(extension)) return null;
+            
+            var mainAsset = AssetDatabase.LoadMainAssetAtPath(path);
+            if (mainAsset == null) return null;
+            if (ExcludeAssetType.Contains(mainAsset.GetType())) return null;
+            
+            var assets = AssetDatabase.LoadAllAssetsAtPath(path);
+            foreach (var asset in assets)
+            {
+                if (ExcludeAssetType.Contains(asset.GetType())) continue;
+                if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out var guid, out long localId))
+                {
+                    result.Add(new Entry
+                    {
+                        path = path,
+                        isMainAsset = mainAsset == asset,
+                        subAssetName = asset.name,
+                        guid = guid,
+                        localId = localId,
+                    });
+                }
+            }
+
+            if (result.Count == 0)
+            {
+                if (assetFileExists)
+                {
+                    AssetDatabase.DeleteAsset(catalogFilePath);
+                    AssetDatabase.SaveAssets();
+                }
+                // dont create if 0 size.
+                return null;
+            }
+            
+            catalogAsset.entries = result.ToArray();
+            EditorUtility.SetDirty(catalogAsset);
+            if (assetFileExists == false)
+            {
+                AssetDatabase.CreateAsset(catalogAsset, catalogFilePath);
+            }
+            AssetDatabase.SaveAssets();
+            
+            return catalogAsset;
+        }
+
+        public static void TruncateAllCatalogs()
+        {
+            var catalogsGuid = AssetDatabase.FindAssets($"t:{nameof(BundlePathCatalog)}");
+            foreach (var guid in catalogsGuid)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                AssetDatabase.DeleteAsset(path);
+            }
+        }
 #endif
+        public static string GetSingleFileBundlePath(string path, string guid)
+        {
+            return Path.Combine(Path.GetDirectoryName(path) ?? "", $"{guid}.catalog.asset");
+        }
     }
 }
