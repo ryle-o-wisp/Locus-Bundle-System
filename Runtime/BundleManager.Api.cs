@@ -76,7 +76,7 @@ namespace BundleSystem
         }
 
 
-        public static T Load<T>(string bundleName, string assetName) where T : UnityEngine.Object
+        public static T Load<T>(string bundleName, string assetName, bool acceptTypeInherited = false) where T : UnityEngine.Object
         {
 #if UNITY_EDITOR
             if (UseAssetDatabase) 
@@ -89,12 +89,22 @@ namespace BundleSystem
 #endif
             if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
             if (!s_AssetBundles.TryGetValue(bundleName, out var foundBundle)) return null;
-            var loadedAsset = foundBundle.Bundle.LoadAsset<T>(assetName);
-            if(loadedAsset != null) TrackObjectInternal(loadedAsset, foundBundle);
-            return loadedAsset;
+
+            if (acceptTypeInherited)
+            {
+                var loadedObjectAsset = foundBundle.Bundle.LoadAsset(assetName) as T;
+                if(loadedObjectAsset != null) TrackObjectInternal(loadedObjectAsset, foundBundle);
+                return loadedObjectAsset;
+            }
+            else
+            {
+                var loadedAsset = foundBundle.Bundle.LoadAsset<T>(assetName);
+                if(loadedAsset != null) TrackObjectInternal(loadedAsset, foundBundle);
+                return loadedAsset;
+            }
         }
 
-        public static T LoadByGuid<T>(string guid) where T : UnityEngine.Object
+        public static T LoadByGuid<T>(string guid, bool acceptTypeInherited = false) where T : UnityEngine.Object
         {
 #if UNITY_EDITOR
             if (UseAssetDatabase)
@@ -114,7 +124,7 @@ namespace BundleSystem
                 var pathCatalog = loadedBundle.PathCatalog;
                 if (loadedBundle.Bundle.isStreamedSceneAssetBundle == false && pathCatalog != null && pathCatalog.TryGetMainAssetPath(guid, out var path))
                 {
-                    return Load<T>(bundleName, path);
+                    return Load<T>(bundleName, path, acceptTypeInherited);
                 }
             }
             return null;
@@ -181,7 +191,7 @@ namespace BundleSystem
         }
 
 
-        public static BundleRequest<T> LoadAsync<T>(string bundleName, string assetName) where T : UnityEngine.Object
+        public static BundleRequest<T> LoadAsync<T>(string bundleName, string assetName, bool acceptTypeInherited = false) where T : UnityEngine.Object
         {
 #if UNITY_EDITOR
             if (UseAssetDatabase) 
@@ -194,14 +204,17 @@ namespace BundleSystem
 #endif
             if(!Initialized) throw new System.Exception("BundleManager not initialized, try initialize first!");
             if (!s_AssetBundles.TryGetValue(bundleName, out var foundBundle)) return new BundleRequest<T>((T)null); //asset not exist
-            var request = foundBundle.Bundle.LoadAssetAsync<T>(assetName);
+            var request = 
+                acceptTypeInherited
+                ? foundBundle.Bundle.LoadAssetAsync(assetName)
+                : foundBundle.Bundle.LoadAssetAsync<T>(assetName);
             //need to keep bundle while loading, so we retain before load, release after load
             RetainBundleInternal(foundBundle, 1);
             request.completed += op => AsyncAssetLoaded(request, foundBundle);
             return new BundleRequest<T>(request);
         }
         
-        public static BundleRequest<T> LoadByGuidAsync<T>(string guid) where T : UnityEngine.Object
+        public static BundleRequest<T> LoadByGuidAsync<T>(string guid, bool acceptTypeInherited = false) where T : UnityEngine.Object
         {
 #if UNITY_EDITOR
             if (UseAssetDatabase) 
@@ -223,7 +236,10 @@ namespace BundleSystem
                 if (pathCatalog != null && pathCatalog.TryGetMainAssetPath(guid, out var path))
                 {
                     if (!s_AssetBundles.TryGetValue(bundleName, out var foundBundle)) return new BundleRequest<T>((T)null); //asset not exist
-                    var request = foundBundle.Bundle.LoadAssetAsync<T>(path);
+                    var request = 
+                        acceptTypeInherited
+                            ? foundBundle.Bundle.LoadAssetAsync(path)
+                            : foundBundle.Bundle.LoadAssetAsync<T>(path);
                     //need to keep bundle while loading, so we retain before load, release after load
                     RetainBundleInternal(foundBundle, 1);
                     request.completed += op => AsyncAssetLoaded(request, foundBundle);

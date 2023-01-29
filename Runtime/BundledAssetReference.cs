@@ -21,6 +21,8 @@ namespace BundleSystem
         [SerializeField]
         public string assetGuid;
 
+        public virtual bool AcceptTypeInheritance => false;
+
         public string GetAssetGuid()
         {
             return assetGuid;
@@ -43,7 +45,7 @@ namespace BundleSystem
         {
             if (isMainAsset)
             {
-                return new BundleRequest<TObject>(BundleManager.LoadByGuid<TObject>(assetGuid), true);
+                return new BundleRequest<TObject>(BundleManager.LoadByGuid<TObject>(assetGuid, AcceptTypeInheritance), true);
             }
             else
             {
@@ -258,6 +260,8 @@ namespace BundleSystem
     [Serializable]
     public sealed class BundledObjectReference : BundledAssetReference<Object>
     {
+        public override bool AcceptTypeInheritance => true;
+        
 #if UNITY_EDITOR
         [CustomPropertyDrawer(typeof(BundledObjectReference))]
         public sealed class PropertyDrawer : BundledAssetReferenceDrawer<Object> {}
