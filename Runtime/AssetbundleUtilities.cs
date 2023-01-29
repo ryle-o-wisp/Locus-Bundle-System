@@ -32,10 +32,18 @@ namespace BundleSystem
             SCENES,
         }
 
+        public static string GetBundleNameWithExtension(string name)
+        {
+            if (name == null) throw new ArgumentNullException(nameof(name));
+            return Path.GetExtension(name) == ".bundle"
+                ? name
+                : $"{name}.bundle";
+        }
+
         /// <summary>
         /// Search files in directory
         /// </summary>
-        public static void GetFilesInDirectory(string dirPrefix, List<string> resultAssetPath, List<string> resultLoadPath, string folderPath, bool includeSubdir, BuildFileType fileType)
+        public static void GetFilesInDirectory(string dirPrefix, List<string> resultAssetPath, List<string> resultLoadPath, string folderPath, bool includeSubdir, string[] otherTerritories, BuildFileType fileType)
         {
             var dir = new DirectoryInfo(Path.GetFullPath(folderPath));
             var files = dir.GetFiles();
@@ -60,8 +68,11 @@ namespace BundleSystem
             {
                 foreach (var subDir in dir.GetDirectories())
                 {
-                    var subdirName = $"{folderPath}/{subDir.Name}";
-                    GetFilesInDirectory(Utility.CombinePath(dirPrefix, subDir.Name), resultAssetPath, resultLoadPath, subdirName, includeSubdir, fileType);
+                    var subDirName = $"{folderPath}/{subDir.Name}";
+                    if ((otherTerritories?.Contains(subDirName) ?? false) == false)
+                    {
+                        GetFilesInDirectory(Utility.CombinePath(dirPrefix, subDir.Name), resultAssetPath, resultLoadPath, subDirName, includeSubdir, otherTerritories, fileType);
+                    }
                 }
             }
         }
@@ -79,7 +90,8 @@ namespace BundleSystem
 
         static void CollectBundleDependenciesRecursive<T>(HashSet<string> result, Dictionary<string, T> deps, string name, string rootName) where T : IEnumerable<string>
         {
-            foreach (var dependency in deps[name])
+            var bundleNameWithExtension = GetBundleNameWithExtension(name);
+            foreach (var dependency in deps[bundleNameWithExtension])
             {
                 //skip root name to prevent cyclic deps calculation
                 if (rootName == dependency) continue;

@@ -1,5 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -15,14 +18,24 @@ namespace BundleSystem
         {
             var assetPath = new List<string>();
             var loadPath = new List<string>();
-            
-            foreach(var package in settings)
+
+            foreach (var package in settings)
+            {
+                var allFolderPaths = package.BundleSettings.Select(setting =>
+                {
+                    //find folder
+                    var folderPath = AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
+                    if (!AssetDatabase.IsValidFolder(folderPath)) return null;
+                    return folderPath;
+                }).Where(path => false == string.IsNullOrEmpty(path)).ToArray();
+
                 foreach(var setting in package.BundleSettings)
                 {
                     assetPath.Clear();
                     loadPath.Clear();
                     var folderPath = UnityEditor.AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
-                    Utility.GetFilesInDirectory(string.Empty, assetPath, loadPath, folderPath, setting.IncludeSubfolder, Utility.BuildFileType.ALL);
+                    var subTerritory = allFolderPaths.Where(path => path.StartsWith(folderPath)).ToArray();
+                    Utility.GetFilesInDirectory(string.Empty, assetPath, loadPath, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ALL);
                     var assetList = new Dictionary<string, List<string>>();
                     for(int i = 0; i < assetPath.Count; i++)
                     {
@@ -35,6 +48,7 @@ namespace BundleSystem
                     }
                     m_Map.Add(setting.BundleName, assetList);
                 }
+            }
         }
 
         public List<string> GetAssetPaths(string bundleName, string assetName)

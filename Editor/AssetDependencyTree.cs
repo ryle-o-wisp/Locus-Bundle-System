@@ -81,7 +81,7 @@ namespace BundleSystem
                 var assetNames = new string[] { sharedRootNode.Path };
                 var bundleDefinition = new AssetBundleBuild()
                 {
-                    assetBundleName = sharedRootNode.BundleName,
+                    assetBundleName = Utility.GetBundleNameWithExtension(sharedRootNode.BundleName),
                     assetNames = assetNames,
                     addressableNames = assetNames
                 };

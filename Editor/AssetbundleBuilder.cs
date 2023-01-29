@@ -204,6 +204,14 @@ namespace BundleSystem
         {
             var bundleList = new List<AssetBundleBuild>();
 
+            var allFolderPaths = settings.BundleSettings.Select(setting =>
+            {
+                //find folder
+                var folderPath = AssetDatabase.GUIDToAssetPath(setting.Folder.guid);
+                if (!AssetDatabase.IsValidFolder(folderPath)) return null;
+                return folderPath;
+            }).Where(path => false == string.IsNullOrEmpty(path)).ToArray();
+
             foreach (var setting in settings.BundleSettings)
             {
                 //find folder
@@ -213,11 +221,13 @@ namespace BundleSystem
                 var catalog = BundlePathCatalog.BuildOrUpdate(folderPath);
                 var catalogPath = AssetDatabase.GetAssetPath(catalog);
 
+                var subTerritory = allFolderPaths.Where(path => path.StartsWith(folderPath)).ToArray();
+
                 //collect assets
                 {
                     var assetPaths = new List<string>();
                     var loadPaths = new List<string>();
-                    Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder, Utility.BuildFileType.ASSETS);
+                    Utility.GetFilesInDirectory(string.Empty, assetPaths, loadPaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.ASSETS);
 
                     var catalogIndex = assetPaths.IndexOf(catalogPath);
                     if (catalogIndex >= 0)
@@ -241,7 +251,7 @@ namespace BundleSystem
                 {
                     var scenePaths = new List<string>();
                     var loadScenePaths = new List<string>();
-                    Utility.GetFilesInDirectory(string.Empty, scenePaths, loadScenePaths, folderPath, setting.IncludeSubfolder, Utility.BuildFileType.SCENES);
+                    Utility.GetFilesInDirectory(string.Empty, scenePaths, loadScenePaths, folderPath, setting.IncludeSubfolder, subTerritory, Utility.BuildFileType.SCENES);
 
                     if (scenePaths.Count > 0)
                     {
