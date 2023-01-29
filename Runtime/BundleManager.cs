@@ -159,7 +159,6 @@ namespace BundleSystem
             s_Helper = managerGo.AddComponent<BundleManagerHelper>();
             s_DebugGUI = managerGo.AddComponent<DebugGuiHelper>();
             s_DebugGUI.enabled = s_ShowDebugGUI;
-            RuntimePackages = new HashSet<string>(AssetBundlePackageBuildSettings.ReadRuntimePackageList());
 #if UNITY_EDITOR
             RuntimePackages =
                 new HashSet<string>(
@@ -169,6 +168,8 @@ namespace BundleSystem
                     .Distinct());
             
             SetupAssetdatabaseUsage();
+#else
+            RuntimePackages = new HashSet<string>(AssetBundlePackageBuildSettings.ReadRuntimePackageList());
 #endif
         }
 
