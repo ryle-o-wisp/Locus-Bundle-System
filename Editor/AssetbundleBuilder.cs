@@ -264,7 +264,7 @@ namespace BundleSystem
                         var newBundle = new AssetBundleBuild();
                         newBundle.assetBundleName = Utility.GetBundleNameWithExtension(setting.BundleName);
                         newBundle.assetNames = assetPaths.ToArray();
-                        newBundle.addressableNames = assetPaths.ToArray();
+                        newBundle.addressableNames = new [] { nameof(BundlePathCatalog) }.Concat(assetPaths.Skip(1)).ToArray();
                         bundleList.Add(newBundle);
                     }
                 }
