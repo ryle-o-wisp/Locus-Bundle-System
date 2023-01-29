@@ -225,6 +225,8 @@ namespace BundleSystem
                 var changedAsset = EditorGUI.ObjectField(referenceFieldPosition, asset, typeof(TObject), false) as TObject;
                 if (changedAsset != asset)
                 {
+                    var changedAssetPath = AssetDatabase.GetAssetPath(changedAsset);
+                    var changedAssetPathMainAsset = AssetDatabase.LoadMainAssetAtPath(changedAssetPath);
                     if (changedAsset == null)
                     {
                         assetGuidProperty.stringValue = null;
@@ -235,7 +237,7 @@ namespace BundleSystem
                     {
                         assetGuidProperty.stringValue = changedGuid;
                         assetLocalIdProperty.longValue = changedLocalId;
-                        isMainAssetProperty.boolValue = changedAsset == mainAsset;
+                        isMainAssetProperty.boolValue = changedAsset == changedAssetPathMainAsset;
                     }
                     else
                     {
